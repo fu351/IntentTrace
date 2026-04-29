@@ -18,13 +18,14 @@ def verify_semantics(
     for operation in _sliced_ops(semantic_ops, "Aggregate"):
       actual = _normalized_string(operation.params.get("function"))
       if actual and actual != expected_aggregation:
+        measure = _normalized_string(operation.params.get("measure"))
         warnings.append(
           _warning(
             kind="wrong_aggregation",
             severity="error",
             operation=operation,
-            title="Aggregation does not match",
-            user_message=f"The code uses {actual}, but the intent asks for {expected_aggregation}.",
+            title="Wrong calculation",
+            user_message=_aggregation_message(expected_aggregation, actual, measure),
             technical_message="Sliced Aggregate operation params.function differs from intent.aggregation.",
             expected=expected_aggregation,
             actual=actual,
@@ -41,8 +42,8 @@ def verify_semantics(
             kind="wrong_chart_type",
             severity="error",
             operation=operation,
-            title="Chart type does not match",
-            user_message=f"The code draws a {actual} chart, but the intent asks for {expected_chart_type}.",
+            title="Wrong chart type",
+            user_message=f"The intent asks for a {_chart_label(expected_chart_type)} chart, but the code draws a {_chart_label(actual)} chart.",
             technical_message="Sliced Plot operation params.chartType differs from intent.chartType.",
             expected=expected_chart_type,
             actual=actual,
@@ -60,7 +61,7 @@ def verify_semantics(
             kind="wrong_grouping",
             severity="error",
             operation=operation,
-            title="Grouping does not match",
+            title="Wrong grouping",
             user_message=f"The code is missing grouping by {_human_list(missing)}.",
             technical_message="Sliced GroupBy operation params.groupBy does not contain all intent.groupBy columns.",
             expected=expected_group_by,
@@ -79,21 +80,21 @@ def verify_semantics(
           kind="vestigial_code",
           severity="info",
           operation=operation,
-          title="Code is outside the selected slice",
-          user_message="This operation does not affect the selected visualization.",
+          title="Extra code",
+          user_message="This step runs, but it does not feed the final chart.",
           technical_message="Semantic operation has inSlice=false.",
           expected="operation in selected computation",
           actual="operation outside selected computation",
         )
       )
-    elif operation.kind == "Unknown":
+    elif operation.kind == "Unknown" and not operation.params.get("displayOnly"):
       warnings.append(
         _warning(
           kind="unsupported_pattern",
           severity="warning",
           operation=operation,
           title="Unsupported code pattern",
-          user_message="IntentTrace cannot yet explain this sliced statement.",
+          user_message="IntentTrace cannot fully explain this line yet, but it will keep the rest of the analysis working.",
           technical_message="Sliced semantic operation kind is Unknown.",
           expected="supported semantic operation",
           actual=operation.params.get("astType", "Unknown"),
@@ -113,11 +114,11 @@ def _append_measure_warnings(
     if actual and actual != expected_measure:
       warnings.append(
         _warning(
-          kind="wrong_measure",
-          severity="error",
-          operation=operation,
-          title="Measure does not match",
-          user_message=f"The code aggregates {actual}, but the intent asks for {expected_measure}.",
+        kind="wrong_measure",
+        severity="error",
+        operation=operation,
+        title="Wrong measure",
+        user_message=f"The code aggregates {actual}, but the intent asks for {expected_measure}.",
           technical_message="Sliced Aggregate operation params.measure differs from intent.measure.",
           expected=expected_measure,
           actual=actual,
@@ -132,7 +133,7 @@ def _append_measure_warnings(
           kind="wrong_measure",
           severity="error",
           operation=operation,
-          title="Plotted measure does not match",
+          title="Wrong plotted measure",
           user_message=f"The chart does not plot {expected_measure}.",
           technical_message="Sliced Plot operation params.columnsUsed does not include intent.measure.",
           expected=expected_measure,
@@ -256,3 +257,27 @@ def _human_list(values: list[str]) -> str:
   if len(values) == 1:
     return values[0]
   return ", ".join(values[:-1]) + f" and {values[-1]}"
+
+
+def _aggregation_message(expected: str, actual: str, measure: str | None) -> str:
+  subject = f" {measure}" if measure else ""
+  return f"The intent asks for the {_aggregation_label(expected)}{subject}, but this code uses the {_aggregation_label(actual)}."
+
+
+def _aggregation_label(value: str) -> str:
+  labels = {
+    "mean": "average",
+    "count": "count",
+    "sum": "total",
+  }
+  return labels.get(value, value)
+
+
+def _chart_label(value: str) -> str:
+  labels = {
+    "line": "line",
+    "bar": "bar",
+    "scatter": "scatter",
+    "histogram": "histogram",
+  }
+  return labels.get(value, value)

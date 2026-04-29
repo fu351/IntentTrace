@@ -59,11 +59,14 @@ def _node_status(
   operation: SemanticOperation,
   warnings: list[VerificationWarning],
 ) -> str:
-  if operation.kind == "Unknown":
-    return "unsupported"
-
   if not operation.in_slice:
     return "vestigial"
+
+  if operation.kind == "Unknown" and operation.params.get("displayOnly"):
+    return "relevant"
+
+  if operation.kind == "Unknown":
+    return "unsupported"
 
   if any(warning.severity == "error" for warning in warnings):
     return "error"

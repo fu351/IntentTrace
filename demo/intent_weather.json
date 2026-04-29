@@ -1,0 +1,30 @@
+{
+  "id": "demo-weather-intent",
+  "prompt": "Make a bar chart of average temperature by state.",
+  "groupBy": [
+    "state"
+  ],
+  "measure": "temperature",
+  "aggregation": "mean",
+  "chartType": "bar",
+  "dataset": {
+    "sourcePath": "weather.csv",
+    "columns": [
+      {
+        "name": "state",
+        "type": "string",
+        "nullable": false
+      },
+      {
+        "name": "temperature",
+        "type": "number",
+        "nullable": false
+      },
+      {
+        "name": "humidity",
+        "type": "number",
+        "nullable": false
+      }
+    ]
+  }
+}
