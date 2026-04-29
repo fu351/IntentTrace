@@ -4,6 +4,10 @@
   "description": "Intent-aware verification for AI-generated analysis code.",
   "version": "0.0.1",
   "publisher": "intenttrace",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fu351/IntentTrace.git"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -12,6 +16,8 @@
   ],
   "activationEvents": [
     "onCommand:intenttrace.start",
+    "onCommand:intenttrace.inferIntent",
+    "onCommand:intenttrace.generateCode",
     "onCommand:intenttrace.runVerifier"
   ],
   "main": "./dist/extension.js",
@@ -20,6 +26,14 @@
       {
         "command": "intenttrace.start",
         "title": "IntentTrace: Start"
+      },
+      {
+        "command": "intenttrace.inferIntent",
+        "title": "IntentTrace: Infer Intent"
+      },
+      {
+        "command": "intenttrace.generateCode",
+        "title": "IntentTrace: Generate Code"
       },
       {
         "command": "intenttrace.runVerifier",
@@ -33,6 +47,16 @@
           "type": "string",
           "default": "",
           "description": "Path to the current IntentTrace intent JSON file. Relative paths resolve from the workspace root."
+        },
+        "intenttrace.schemaPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to a DatasetSchema JSON file. Relative paths resolve from the workspace root."
+        },
+        "intenttrace.languageModel": {
+          "type": "string",
+          "default": "",
+          "description": "Optional VS Code Language Model id. Leave empty to use the first available built-in chat model."
         }
       }
     }
@@ -41,6 +65,9 @@
     "build:webview": "vite build --config webview/vite.config.ts",
     "compile": "tsc -p ./",
     "compile:all": "npm run build:webview && npm run compile",
+    "package:vsix": "npm run compile:all && vsce package -o dist/intenttrace.vsix",
+    "install:local": "code --install-extension dist/intenttrace.vsix --force",
+    "test": "python -m pytest analyzer/tests",
     "watch": "tsc -watch -p ./",
     "vscode:prepublish": "npm run compile:all"
   },
@@ -50,11 +77,10 @@
     "@types/react-dom": "^19.2.3",
     "@types/vscode": "^1.90.0",
     "@vitejs/plugin-react": "^6.0.1",
+    "@vscode/vsce": "^3.9.1",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
     "typescript": "^5.5.2",
     "vite": "^8.0.10"
-  },
-  "dependencies": {
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5"
   }
 }
