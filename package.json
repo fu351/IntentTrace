@@ -1,0 +1,50 @@
+{
+  "name": "intenttrace",
+  "displayName": "IntentTrace",
+  "description": "Intent-aware verification for AI-generated analysis code.",
+  "version": "0.0.1",
+  "publisher": "intenttrace",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:intenttrace.start",
+    "onCommand:intenttrace.runVerifier"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "intenttrace.start",
+        "title": "IntentTrace: Start"
+      },
+      {
+        "command": "intenttrace.runVerifier",
+        "title": "IntentTrace: Run Verifier"
+      }
+    ],
+    "configuration": {
+      "title": "IntentTrace",
+      "properties": {
+        "intenttrace.intentPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the current IntentTrace intent JSON file. Relative paths resolve from the workspace root."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.8",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.5.2"
+  }
+}

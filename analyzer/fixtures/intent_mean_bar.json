@@ -1,0 +1,32 @@
+{
+  "prompt": "Show the mean revenue by region as a bar chart.",
+  "dataset": {
+    "sourcePath": "sales.csv",
+    "columns": [
+      {
+        "name": "region",
+        "type": "string",
+        "nullable": false
+      },
+      {
+        "name": "revenue",
+        "type": "number",
+        "nullable": false
+      }
+    ]
+  },
+  "operations": [
+    "ReadCSV",
+    "GroupBy",
+    "Aggregate",
+    "Plot"
+  ],
+  "expectedVisualization": {
+    "chartType": "bar",
+    "x": "region",
+    "y": "revenue",
+    "groupBy": [
+      "region"
+    ]
+  }
+}
