@@ -64,6 +64,22 @@ export class WebviewPanelManager implements vscode.Disposable {
     });
   }
 
+  public showLoading(message = 'Running analyzer...'): void {
+    this.open();
+    this.panel?.webview.postMessage({
+      type: 'analysisLoading',
+      message
+    });
+  }
+
+  public showError(message: string): void {
+    this.open();
+    this.panel?.webview.postMessage({
+      type: 'analysisError',
+      message
+    });
+  }
+
   public dispose(): void {
     this.panel?.dispose();
     this.panel = undefined;

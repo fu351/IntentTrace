@@ -53,6 +53,31 @@ button {
   font-size: 12px;
 }
 
+.state-banner,
+.empty-state {
+  border: 1px solid var(--vscode-panel-border, #d0d7de);
+  border-left: 4px solid var(--vscode-focusBorder, #0969da);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  background: var(--vscode-editorWidget-background, #f6f8fa);
+}
+
+.state-banner[data-state="loading"] {
+  border-left-color: var(--vscode-progressBar-background, #0969da);
+}
+
+.state-banner[data-state="error"] {
+  border-left-color: var(--vscode-editorError-foreground, #cf222e);
+}
+
+.state-banner span,
+.empty-state p {
+  color: var(--vscode-descriptionForeground, #5d646d);
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(280px, 1fr) minmax(240px, 320px) minmax(240px, 320px);
@@ -235,6 +260,16 @@ button {
   display: grid;
   gap: 8px;
   margin-top: 10px;
+}
+
+.notes-section {
+  margin-top: 14px;
+}
+
+.notes-section summary {
+  color: var(--vscode-descriptionForeground, #5d646d);
+  cursor: pointer;
+  font-size: 12px;
 }
 
 .warning-card {

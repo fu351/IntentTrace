@@ -24,6 +24,7 @@ export function registerRunVerifierCommand(
     }
 
     try {
+      webviewPanelManager.showLoading('Running IntentTrace on the active Python file...');
       const result = await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
@@ -39,7 +40,9 @@ export function registerRunVerifierCommand(
       });
       decorationsManager.applyAnalysis(result.flowGraph, result.warnings);
     } catch (error) {
-      vscode.window.showErrorMessage(`IntentTrace analyzer failed: ${error instanceof Error ? error.message : String(error)}`);
+      const message = `IntentTrace analyzer failed: ${error instanceof Error ? error.message : String(error)}`;
+      webviewPanelManager.showError(message);
+      vscode.window.showErrorMessage(message);
     }
   });
 }

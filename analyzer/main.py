@@ -8,7 +8,7 @@ from typing import Any
 
 from flowgraph import build_flow_graph
 from parser import parse_program
-from schemas import AnalyzerResult, to_jsonable
+from schemas import AnalyzerResult, SliceResult, to_jsonable
 from semantic import lower_to_semantic_operations
 from sinks import detect_visualization_sinks, select_sink
 from slicer import build_slicing_criterion, slice_program
@@ -63,7 +63,16 @@ def run_verify(
   selected_sink = select_sink(sinks, intent)
   slicing_criterion = build_slicing_criterion(selected_sink)
   slice_result = slice_program(program_nodes, slicing_criterion)
-  semantic_ops = lower_to_semantic_operations(slice_result)
+  semantic_ops = lower_to_semantic_operations(
+    SliceResult(
+      criterion=slice_result.criterion,
+      nodes=[node for node in program_nodes if node.kind != "import"],
+      spans=[node.span for node in program_nodes if node.kind != "import"],
+      relevant_node_ids=slice_result.relevant_node_ids,
+      irrelevant_node_ids=slice_result.irrelevant_node_ids,
+      dependency_edges=slice_result.dependency_edges,
+    )
+  )
   warnings = verify_semantics(semantic_ops, intent, schema)
   flow_graph = build_flow_graph(
     semantic_ops,

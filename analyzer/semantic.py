@@ -71,6 +71,10 @@ def _lower_node(node: ProgramNode, in_slice: bool) -> list[SemanticOperation]:
   if plot is not None:
     return [_plot_operation(node, plot, in_slice)]
 
+  show_plot = _find_call(ast_node, {"plt.show", "matplotlib.pyplot.show"})
+  if show_plot is not None:
+    return [_show_plot_operation(node, in_slice)]
+
   return [_unknown_operation(node, in_slice)]
 
 
@@ -78,8 +82,8 @@ def _read_csv_operation(node: ProgramNode, call: ast.Call, in_slice: bool) -> Se
   source = _first_string_argument(call)
   return _operation(
     kind="ReadCSV",
-    label="Read CSV",
-    lay_description=f"Load rows from {source}." if source else "Load rows from a CSV file.",
+    label=f"Load {source}" if source else "Load CSV data",
+    lay_description=f"Read the weather data from {source}." if source else "Read rows from a CSV file.",
     node=node,
     in_slice=in_slice,
     params={"source": source, "output": _first_or_none(node.defines)},
@@ -90,7 +94,7 @@ def _dropna_operation(node: ProgramNode, call: ast.Call, in_slice: bool) -> Sema
   subset = _keyword_string_list(call, "subset")
   return _operation(
     kind="DropNA",
-    label="Drop missing values",
+    label="Remove incomplete rows",
     lay_description=_dropna_description(subset),
     node=node,
     in_slice=in_slice,
@@ -102,8 +106,8 @@ def _groupby_operation(node: ProgramNode, call: ast.Call, in_slice: bool) -> Sem
   group_columns = _string_arguments(call)
   return _operation(
     kind="GroupBy",
-    label="Group rows",
-    lay_description=f"Group rows by {_human_list(group_columns)}." if group_columns else "Group rows.",
+    label=f"Group by {_human_list(group_columns)}" if group_columns else "Group rows",
+    lay_description=f"Put rows with the same {_human_list(group_columns)} together." if group_columns else "Put related rows into groups.",
     node=node,
     in_slice=in_slice,
     params={"groupBy": group_columns, "input": _base_object_name(call)},
@@ -128,7 +132,7 @@ def _aggregate_operation(
 
   return _operation(
     kind="Aggregate",
-    label=f"Aggregate with {params['function']}",
+    label=_aggregate_label(params["function"], measure),
     lay_description=_aggregate_description(params["function"], measure),
     node=node,
     in_slice=in_slice,
@@ -142,8 +146,8 @@ def _plot_operation(node: ProgramNode, call: ast.Call, in_slice: bool) -> Semant
   columns = _columns_used_in_call(call)
   return _operation(
     kind="Plot",
-    label=f"Plot {chart_type} chart",
-    lay_description=f"Draw a {chart_type} chart.",
+    label=f"{_chart_label(chart_type)} chart",
+    lay_description=f"Draw a {_chart_label(chart_type).lower()} chart for the selected result.",
     node=node,
     in_slice=in_slice,
     params={
@@ -155,14 +159,26 @@ def _plot_operation(node: ProgramNode, call: ast.Call, in_slice: bool) -> Semant
   )
 
 
-def _unknown_operation(node: ProgramNode, in_slice: bool) -> SemanticOperation:
+def _show_plot_operation(node: ProgramNode, in_slice: bool) -> SemanticOperation:
   return _operation(
     kind="Unknown",
-    label="Unsupported statement",
-    lay_description="This statement is not recognized by the current semantic lowerer.",
+    label="Show chart",
+    lay_description="Display the chart that was created in the previous step.",
     node=node,
     in_slice=in_slice,
-    params={"astType": node.ast_type},
+    params={"astType": node.ast_type, "displayOnly": True},
+  )
+
+
+def _unknown_operation(node: ProgramNode, in_slice: bool) -> SemanticOperation:
+  label, description = _unknown_label_and_description(node)
+  return _operation(
+    kind="Unknown",
+    label=label,
+    lay_description=description,
+    node=node,
+    in_slice=in_slice,
+    params={"astType": node.ast_type, "codeSnippet": node.code_snippet},
   )
 
 
@@ -342,14 +358,51 @@ def _human_list(values: list[str]) -> str:
 
 def _dropna_description(subset: list[str]) -> str:
   if subset:
-    return f"Remove rows missing values in {_human_list(subset)}."
+    return f"Keep only rows that have {_human_list(subset)} values."
   return "Remove rows with missing values."
 
 
 def _aggregate_description(function: str, measure: str | None) -> str:
+  function_label = _aggregation_label(function)
   if measure:
-    return f"Calculate the {function} of {measure} for each group."
-  return f"Calculate the {function} for each group."
+    return f"Calculate the {function_label} of {measure} for each group."
+  return f"Calculate the {function_label} for each group."
+
+
+def _aggregate_label(function: str, measure: str | None) -> str:
+  label = _aggregation_label(function)
+  if measure:
+    return f"{label.capitalize()} {measure}"
+  return f"{label.capitalize()} values"
+
+
+def _aggregation_label(function: str) -> str:
+  labels = {
+    "mean": "average",
+    "count": "count",
+    "sum": "total",
+    "aggregate": "summary",
+  }
+  return labels.get(function, function)
+
+
+def _chart_label(chart_type: str) -> str:
+  labels = {
+    "line": "Line",
+    "bar": "Bar",
+    "scatter": "Scatter",
+    "histogram": "Histogram",
+  }
+  return labels.get(chart_type, chart_type.capitalize())
+
+
+def _unknown_label_and_description(node: ProgramNode) -> tuple[str, str]:
+  snippet = node.code_snippet.strip()
+  if "print(" in snippet:
+    return "Print preview", "Print a quick preview for the developer; it does not build the final chart."
+  if ".copy(" in snippet:
+    return "Backup copy", "Make a copy of the data; this copy is not used by the final chart."
+  return "Other code", "This statement is outside the small pandas/matplotlib patterns IntentTrace explains today."
 
 
 def _attach_parent_links(node: ast.AST) -> None:

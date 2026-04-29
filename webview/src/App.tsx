@@ -10,9 +10,23 @@ import './styles.css';
 export function App() {
   const [payload, setPayload] = useState<AnalysisPayload>(() => getInitialPayload() ?? fixturePayload);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(payload.flowGraph.nodes[0]?.nodeId ?? null);
+  const [viewState, setViewState] = useState<'fixture' | 'loading' | 'ready' | 'error'>(() => getInitialPayload() ? 'ready' : 'fixture');
+  const [statusMessage, setStatusMessage] = useState<string>(() => getInitialPayload() ? '' : 'Showing built-in demo data. Run the verifier to load live analyzer output.');
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'analysisLoading') {
+        setViewState('loading');
+        setStatusMessage(event.data.message || 'Running analyzer...');
+        return;
+      }
+
+      if (event.data?.type === 'analysisError') {
+        setViewState('error');
+        setStatusMessage(event.data.message || 'Analyzer failed.');
+        return;
+      }
+
       if (event.data?.type !== 'analysisResult') {
         return;
       }
@@ -20,6 +34,8 @@ export function App() {
       const nextPayload = event.data.payload as AnalysisPayload;
       setPayload(nextPayload);
       setSelectedNodeId(nextPayload.flowGraph.nodes[0]?.nodeId ?? null);
+      setViewState('ready');
+      setStatusMessage('');
     };
 
     window.addEventListener('message', handleMessage);
@@ -49,6 +65,20 @@ export function App() {
         </div>
       </header>
 
+      {viewState !== 'ready' ? (
+        <section className="state-banner" data-state={viewState}>
+          <strong>{stateTitle(viewState)}</strong>
+          <span>{statusMessage}</span>
+        </section>
+      ) : null}
+
+      {payload.flowGraph.nodes.length === 0 ? (
+        <section className="empty-state">
+          <h2>No semantic steps found</h2>
+          <p>Open a Python analysis file and run IntentTrace again.</p>
+        </section>
+      ) : null}
+
       <section className="workspace">
         <div className="flow-column">
           <Flowchart graph={payload.flowGraph} selectedNodeId={selectedNodeId} onSelectNode={selectNode} />
@@ -62,6 +92,19 @@ export function App() {
 
 function shortName(value: string): string {
   return value.replace(/\\/g, '/').split('/').pop() ?? value;
+}
+
+function stateTitle(state: 'fixture' | 'loading' | 'ready' | 'error'): string {
+  if (state === 'loading') {
+    return 'Analyzing code';
+  }
+  if (state === 'error') {
+    return 'Analyzer error';
+  }
+  if (state === 'fixture') {
+    return 'Demo preview';
+  }
+  return '';
 }
 
 createRoot(document.getElementById('root') as HTMLElement).render(<App />);
