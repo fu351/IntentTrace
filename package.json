@@ -38,13 +38,23 @@
     }
   },
   "scripts": {
+    "build:webview": "vite build --config webview/vite.config.ts",
     "compile": "tsc -p ./",
+    "compile:all": "npm run build:webview && npm run compile",
     "watch": "tsc -watch -p ./",
-    "vscode:prepublish": "npm run compile"
+    "vscode:prepublish": "npm run compile:all"
   },
   "devDependencies": {
     "@types/node": "^20.14.8",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@types/vscode": "^1.90.0",
-    "typescript": "^5.5.2"
+    "@vitejs/plugin-react": "^6.0.1",
+    "typescript": "^5.5.2",
+    "vite": "^8.0.10"
+  },
+  "dependencies": {
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
   }
 }

@@ -2,12 +2,14 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { PythonAnalysisService } from '../services/PythonAnalysisService';
+import { DecorationsManager } from '../vscode/DecorationsManager';
 import { WebviewPanelManager } from '../vscode/WebviewPanelManager';
 
 export function registerRunVerifierCommand(
   context: vscode.ExtensionContext,
   analysisService: PythonAnalysisService,
-  webviewPanelManager: WebviewPanelManager
+  webviewPanelManager: WebviewPanelManager,
+  decorationsManager: DecorationsManager
 ): vscode.Disposable {
   return vscode.commands.registerCommand('intenttrace.runVerifier', async () => {
     const codeFileUri = getActivePythonFileUri();
@@ -35,6 +37,7 @@ export function registerRunVerifierCommand(
         flowGraph: result.flowGraph,
         warnings: result.warnings
       });
+      decorationsManager.applyAnalysis(result.flowGraph, result.warnings);
     } catch (error) {
       vscode.window.showErrorMessage(`IntentTrace analyzer failed: ${error instanceof Error ? error.message : String(error)}`);
     }

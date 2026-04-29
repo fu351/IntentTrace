@@ -7,11 +7,19 @@ export interface WebviewAnalysisPayload {
   warnings: VerificationWarning[];
 }
 
+export interface WebviewPanelHandlers {
+  onNodeClicked?(nodeId: string): void | Promise<void>;
+  onWarningClicked?(warningId: string): void | Promise<void>;
+}
+
 export class WebviewPanelManager implements vscode.Disposable {
   private panel: vscode.WebviewPanel | undefined;
   private analysisPayload: WebviewAnalysisPayload | undefined;
 
-  public constructor(private readonly extensionUri: vscode.Uri) {}
+  public constructor(
+    private readonly extensionUri: vscode.Uri,
+    private readonly handlers: WebviewPanelHandlers = {}
+  ) {}
 
   public open(): void {
     if (this.panel) {
@@ -25,11 +33,23 @@ export class WebviewPanelManager implements vscode.Disposable {
       vscode.ViewColumn.One,
       {
         enableScripts: true,
-        localResourceRoots: [this.extensionUri]
+        localResourceRoots: [
+          vscode.Uri.joinPath(this.extensionUri, 'webview', 'dist')
+        ]
       }
     );
 
     this.panel.webview.html = this.renderHtml();
+    this.panel.webview.onDidReceiveMessage((message: unknown) => {
+      if (isNodeClickedMessage(message)) {
+        void this.handlers.onNodeClicked?.(message.nodeId);
+        return;
+      }
+
+      if (isWarningClickedMessage(message)) {
+        void this.handlers.onWarningClicked?.(message.warningId);
+      }
+    });
     this.panel.onDidDispose(() => {
       this.panel = undefined;
     });
@@ -50,185 +70,56 @@ export class WebviewPanelManager implements vscode.Disposable {
   }
 
   private renderHtml(): string {
+    if (!this.panel) {
+      return '';
+    }
+
     const initialPayload = JSON.stringify(this.analysisPayload ?? null).replace(/</g, '\\u003c');
+    const nonce = getNonce();
+    const scriptUri = this.panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'webview', 'dist', 'assets', 'index.js')
+    );
+    const styleUri = this.panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'webview', 'dist', 'assets', 'index.css')
+    );
 
     return /* html */ `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${this.panel.webview.cspSource}; script-src 'nonce-${nonce}';">
   <title>IntentTrace Verification View</title>
-  <style>
-    body {
-      font-family: var(--vscode-font-family);
-      color: var(--vscode-foreground);
-      background: var(--vscode-editor-background);
-      margin: 0;
-      padding: 24px;
-    }
-
-    header {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: 16px;
-      margin-bottom: 18px;
-    }
-
-    h1 {
-      font-size: 20px;
-      font-weight: 600;
-      margin: 0;
-    }
-
-    p {
-      margin: 0;
-      color: var(--vscode-descriptionForeground);
-    }
-
-    .summary {
-      color: var(--vscode-descriptionForeground);
-      font-size: 12px;
-    }
-
-    .graph {
-      display: grid;
-      gap: 10px;
-    }
-
-    .node {
-      border: 1px solid var(--vscode-panel-border);
-      border-left-width: 4px;
-      border-radius: 6px;
-      padding: 10px 12px;
-      background: var(--vscode-editorWidget-background);
-    }
-
-    .node[data-status="relevant"] {
-      border-left-color: var(--vscode-charts-green);
-    }
-
-    .node[data-status="vestigial"] {
-      border-left-color: var(--vscode-descriptionForeground);
-      opacity: 0.78;
-    }
-
-    .node[data-status="warning"] {
-      border-left-color: var(--vscode-editorWarning-foreground);
-    }
-
-    .node[data-status="error"] {
-      border-left-color: var(--vscode-editorError-foreground);
-    }
-
-    .node[data-status="unsupported"] {
-      border-left-color: var(--vscode-editorInfo-foreground);
-    }
-
-    .node-title {
-      color: var(--vscode-foreground);
-      font-weight: 600;
-      margin-bottom: 4px;
-    }
-
-    .node-meta {
-      color: var(--vscode-descriptionForeground);
-      font-size: 12px;
-      margin-top: 8px;
-    }
-
-    .warnings {
-      margin-top: 20px;
-      display: grid;
-      gap: 8px;
-    }
-
-    .warning {
-      border: 1px solid var(--vscode-panel-border);
-      border-radius: 6px;
-      padding: 10px 12px;
-      background: var(--vscode-inputValidation-warningBackground);
-    }
-
-    .warning[data-severity="error"] {
-      background: var(--vscode-inputValidation-errorBackground);
-    }
-  </style>
+  <link rel="stylesheet" href="${styleUri}">
 </head>
 <body>
-  <header>
-    <h1>IntentTrace Verification View</h1>
-    <div id="summary" class="summary"></div>
-  </header>
-  <main>
-    <section id="graph" class="graph">
-      <p>Run the verifier to load analyzer output.</p>
-    </section>
-    <section id="warnings" class="warnings"></section>
-  </main>
-  <script id="initial-data" type="application/json">${initialPayload}</script>
-  <script>
-    const graphContainer = document.getElementById('graph');
-    const warningContainer = document.getElementById('warnings');
-    const summary = document.getElementById('summary');
-
-    function render(payload) {
-      if (!payload || !payload.flowGraph) {
-        return;
-      }
-
-      const graph = payload.flowGraph;
-      const warnings = payload.warnings || [];
-      summary.textContent = graph.nodes.length + ' operations, ' + warnings.length + ' warnings';
-      graphContainer.replaceChildren(...graph.nodes.map(renderNode));
-      warningContainer.replaceChildren(...warnings.map(renderWarning));
-    }
-
-    function renderNode(node) {
-      const element = document.createElement('article');
-      element.className = 'node';
-      element.dataset.status = node.status;
-
-      const title = document.createElement('div');
-      title.className = 'node-title';
-      title.textContent = node.title + ' [' + node.status + ']';
-
-      const description = document.createElement('p');
-      description.textContent = node.description;
-
-      const meta = document.createElement('div');
-      meta.className = 'node-meta';
-      meta.textContent = 'Op ' + node.opId + ' · Source nodes ' + node.sourceNodeIds.join(', ');
-
-      element.append(title, description, meta);
-      return element;
-    }
-
-    function renderWarning(warning) {
-      const element = document.createElement('article');
-      element.className = 'warning';
-      element.dataset.severity = warning.severity;
-
-      const title = document.createElement('div');
-      title.className = 'node-title';
-      title.textContent = warning.title + ' [' + warning.kind + ']';
-
-      const message = document.createElement('p');
-      message.textContent = warning.userMessage;
-
-      element.append(title, message);
-      return element;
-    }
-
-    window.addEventListener('message', (event) => {
-      if (event.data && event.data.type === 'analysisResult') {
-        render(event.data.payload);
-      }
-    });
-
-    render(JSON.parse(document.getElementById('initial-data').textContent));
-  </script>
+  <div id="root"></div>
+  <script nonce="${nonce}">window.__INTENTTRACE_INITIAL_DATA__ = ${initialPayload};</script>
+  <script nonce="${nonce}" type="module" src="${scriptUri}"></script>
 </body>
 </html>`;
   }
+}
+
+function isNodeClickedMessage(message: unknown): message is { type: 'nodeClicked'; nodeId: string } {
+  return typeof message === 'object'
+    && message !== null
+    && (message as { type?: unknown }).type === 'nodeClicked'
+    && typeof (message as { nodeId?: unknown }).nodeId === 'string';
+}
+
+function isWarningClickedMessage(message: unknown): message is { type: 'warningClicked'; warningId: string } {
+  return typeof message === 'object'
+    && message !== null
+    && (message as { type?: unknown }).type === 'warningClicked'
+    && typeof (message as { warningId?: unknown }).warningId === 'string';
+}
+
+function getNonce(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let nonce = '';
+  for (let index = 0; index < 32; index += 1) {
+    nonce += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return nonce;
 }
