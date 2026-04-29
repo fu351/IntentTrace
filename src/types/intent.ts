@@ -1,20 +1,14 @@
-export interface DatasetColumn {
-  name: string;
-  type: 'string' | 'number' | 'boolean' | 'date' | 'unknown';
-  nullable: boolean;
-  sampleValues?: unknown[];
-}
-
-export interface DatasetSchema {
-  sourcePath: string;
-  columns: DatasetColumn[];
-  rowCount?: number;
-}
+import type { DatasetSchema } from './schema';
 
 export interface IntentDSL {
+  id?: string;
   prompt: string;
   dataset: DatasetSchema;
-  operations: string[];
+  groupBy?: string[];
+  measure?: string;
+  aggregation?: 'mean' | 'count' | 'sum' | 'min' | 'max' | 'median' | string;
+  chartType?: 'bar' | 'line' | 'scatter' | 'histogram' | string;
+  operations?: string[];
   expectedVisualization?: {
     chartType?: string;
     x?: string;
