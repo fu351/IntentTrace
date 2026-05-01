@@ -3,48 +3,171 @@ import { createRoot } from 'react-dom/client';
 import { Flowchart } from './Flowchart';
 import { NodeDetails } from './NodeDetails';
 import { WarningPanel } from './WarningPanel';
-import { fixturePayload } from './fixturePayload';
-import { getInitialPayload, postNodeClicked, type AnalysisPayload, type FlowNode } from './vscodeApi';
+import {
+  getInitialState,
+  getViewKind,
+  postGenerateCode,
+  postInferIntent,
+  postNodeClicked,
+  postOpenGeneratedCode,
+  postOpenIntentDocument,
+  postOpenResultsPanel,
+  postPickCsv,
+  postRunVerifier,
+  type AnalysisPayload,
+  type DatasetSchema,
+  type FlowNode,
+  type IntentDSL
+} from './vscodeApi';
 import './styles.css';
 
+type WorkflowState = 'idle' | 'loading' | 'error';
+
 export function App() {
-  const [payload, setPayload] = useState<AnalysisPayload>(() => getInitialPayload() ?? fixturePayload);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(payload.flowGraph.nodes[0]?.nodeId ?? null);
-  const [viewState, setViewState] = useState<'fixture' | 'loading' | 'ready' | 'error'>(() => getInitialPayload() ? 'ready' : 'fixture');
-  const [statusMessage, setStatusMessage] = useState<string>(() => getInitialPayload() ? '' : 'Showing built-in demo data. Run the verifier to load live analyzer output.');
+  return getViewKind() === 'sidebar' ? <SidebarApp /> : <ResultsApp />;
+}
 
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'analysisLoading') {
-        setViewState('loading');
-        setStatusMessage(event.data.message || 'Running analyzer...');
-        return;
-      }
+function SidebarApp() {
+  const initialState = getInitialState();
+  const [prompt, setPrompt] = useState(initialState.prompt ?? '');
+  const [schema, setSchema] = useState<DatasetSchema | null>(initialState.datasetSchema ?? initialState.intent?.dataset ?? null);
+  const [intentJson, setIntentJson] = useState(() => initialState.intent ? JSON.stringify(initialState.intent, null, 2) : '');
+  const [payload, setPayload] = useState<AnalysisPayload | null>(initialState.analysisPayload ?? null);
+  const [workflowState, setWorkflowState] = useState<WorkflowState>('idle');
+  const [statusMessage, setStatusMessage] = useState(initialState.statusMessage ?? '');
+  const [generatedCodePath, setGeneratedCodePath] = useState(initialState.generatedCodePath ?? '');
 
-      if (event.data?.type === 'analysisError') {
-        setViewState('error');
-        setStatusMessage(event.data.message || 'Analyzer failed.');
-        return;
-      }
+  useIntentTraceMessages({
+    setWorkflowState,
+    setStatusMessage,
+    setSchema,
+    setIntentJson,
+    setGeneratedCodePath,
+    setPayload
+  });
 
-      if (event.data?.type !== 'analysisResult') {
-        return;
-      }
+  const parsedIntent = useMemo(() => parseIntent(intentJson), [intentJson]);
+  const inferDisabled = workflowState === 'loading' || !prompt.trim() || !schema;
+  const actionDisabled = workflowState === 'loading' || !parsedIntent.intent;
+  const issueCount = payload?.warnings.filter((warning) => warning.severity !== 'info').length ?? 0;
 
-      const nextPayload = event.data.payload as AnalysisPayload;
-      setPayload(nextPayload);
-      setSelectedNodeId(nextPayload.flowGraph.nodes[0]?.nodeId ?? null);
-      setViewState('ready');
-      setStatusMessage('');
-    };
+  return (
+    <main className="app-shell app-shell--sidebar">
+      <header className="app-header">
+        <div>
+          <h1>IntentTrace</h1>
+          <p>Prompt, generate and verify Python analysis code.</p>
+        </div>
+      </header>
 
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, []);
+      <section className="workflow-panel" aria-label="IntentTrace workflow">
+        <label className="field-label" htmlFor="prompt-input">Analysis prompt</label>
+        <textarea
+          id="prompt-input"
+          className="prompt-input"
+          rows={4}
+          value={prompt}
+          onChange={(event) => setPrompt(event.target.value)}
+          placeholder="Make a bar chart of average temperature by state."
+        />
+
+        <div className="dataset-row">
+          <button className="primary-button" type="button" onClick={postPickCsv} disabled={workflowState === 'loading'}>
+            Choose CSV
+          </button>
+          <div>
+            <strong>{schema ? shortName(schema.sourcePath) : 'No CSV selected'}</strong>
+            <span>{schema ? `${schema.columns.length} columns${schema.rowCount !== undefined ? `, ${schema.rowCount} rows` : ''}` : 'Select a dataset before inferring intent.'}</span>
+          </div>
+        </div>
+
+        {schema ? (
+          <div className="schema-preview" aria-label="Detected columns">
+            {schema.columns.map((column) => (
+              <span key={column.name}>{column.name}</span>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="action-row">
+          <button type="button" onClick={() => schema ? postInferIntent(prompt, schema) : undefined} disabled={inferDisabled}>
+            Infer Intent
+          </button>
+          <button type="button" onClick={() => parsedIntent.intent ? postGenerateCode(parsedIntent.intent) : undefined} disabled={actionDisabled}>
+            Generate Code
+          </button>
+          <button type="button" onClick={() => parsedIntent.intent ? postRunVerifier(parsedIntent.intent) : undefined} disabled={actionDisabled}>
+            Run Verifier
+          </button>
+        </div>
+      </section>
+
+      <section className="workflow-panel" aria-label="Open IntentTrace panels">
+        <div className="section-heading">
+          <h2>Panels</h2>
+        </div>
+        <div className="action-row">
+          <button type="button" onClick={postOpenResultsPanel} disabled={!payload}>
+            Open Flowchart Results
+          </button>
+          <button type="button" onClick={postOpenGeneratedCode} disabled={!generatedCodePath}>
+            Open Generated Code
+          </button>
+          <button type="button" onClick={() => parsedIntent.intent ? postOpenIntentDocument(parsedIntent.intent) : undefined} disabled={!parsedIntent.intent}>
+            Open Intent JSON
+          </button>
+        </div>
+        {payload ? (
+          <div className="result-summary">
+            <strong>{issueCount} issue{issueCount === 1 ? '' : 's'}</strong>
+            <span>{payload.flowGraph.nodes.length} semantic step{payload.flowGraph.nodes.length === 1 ? '' : 's'} from {shortName(payload.flowGraph.codeId)}</span>
+          </div>
+        ) : (
+          <p className="sidebar-note">Run the verifier to enable the flowchart results panel.</p>
+        )}
+      </section>
+
+      <section className="intent-editor" aria-label="Editable intent JSON">
+        <div className="section-heading">
+          <h2>Confirmed Intent JSON</h2>
+          {parsedIntent.error ? <span className="parse-error">Invalid JSON</span> : null}
+        </div>
+        <textarea
+          rows={12}
+          value={intentJson}
+          onChange={(event) => setIntentJson(event.target.value)}
+          placeholder="Infer intent from a prompt, or paste IntentDSL JSON here."
+        />
+        {parsedIntent.error ? <p className="error-text">{parsedIntent.error}</p> : null}
+      </section>
+
+      {statusMessage ? (
+        <section className="state-banner" data-state={workflowState}>
+          <strong>{workflowState === 'error' ? 'Needs attention' : workflowState === 'loading' ? 'Working' : 'Status'}</strong>
+          <span>{statusMessage}</span>
+        </section>
+      ) : null}
+    </main>
+  );
+}
+
+function ResultsApp() {
+  const initialState = getInitialState();
+  const [payload, setPayload] = useState<AnalysisPayload | null>(initialState.analysisPayload ?? null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(initialState.analysisPayload?.flowGraph.nodes[0]?.nodeId ?? null);
+  const [workflowState, setWorkflowState] = useState<WorkflowState>('idle');
+  const [statusMessage, setStatusMessage] = useState(initialState.statusMessage ?? '');
+
+  useIntentTraceMessages({
+    setWorkflowState,
+    setStatusMessage,
+    setPayload,
+    onPayload: (nextPayload) => setSelectedNodeId(nextPayload.flowGraph.nodes[0]?.nodeId ?? null)
+  });
 
   const selectedNode = useMemo(
-    () => payload.flowGraph.nodes.find((node) => node.nodeId === selectedNodeId) ?? null,
-    [payload.flowGraph.nodes, selectedNodeId]
+    () => payload?.flowGraph.nodes.find((node) => node.nodeId === selectedNodeId) ?? null,
+    [payload?.flowGraph.nodes, selectedNodeId]
   );
 
   const selectNode = (node: FlowNode) => {
@@ -53,58 +176,173 @@ export function App() {
   };
 
   return (
-    <main className="app-shell">
+    <main className="app-shell app-shell--results">
       <header className="app-header">
         <div>
           <h1>IntentTrace Verification View</h1>
-          <p>{payload.flowGraph.nodes.length} semantic steps from {shortName(payload.flowGraph.codeId)}</p>
+          <p>{payload ? `${payload.flowGraph.nodes.length} semantic steps from ${shortName(payload.flowGraph.codeId)}` : 'Run the verifier from the IntentTrace sidebar.'}</p>
         </div>
-        <div className="graph-meta">
-          <span>{payload.warnings.length} warnings</span>
-          <span>{payload.flowGraph.intentId}</span>
-        </div>
+        {payload ? (
+          <div className="graph-meta">
+            <span>{payload.warnings.length} warnings</span>
+            <span>{payload.flowGraph.intentId}</span>
+          </div>
+        ) : null}
       </header>
 
-      {viewState !== 'ready' ? (
-        <section className="state-banner" data-state={viewState}>
-          <strong>{stateTitle(viewState)}</strong>
+      {statusMessage ? (
+        <section className="state-banner" data-state={workflowState}>
+          <strong>{workflowState === 'error' ? 'Analyzer error' : workflowState === 'loading' ? 'Analyzing code' : 'Status'}</strong>
           <span>{statusMessage}</span>
         </section>
       ) : null}
 
-      {payload.flowGraph.nodes.length === 0 ? (
+      {!payload ? (
         <section className="empty-state">
-          <h2>No semantic steps found</h2>
-          <p>Open a Python analysis file and run IntentTrace again.</p>
+          <h2>No verification output yet</h2>
+          <p>Use the IntentTrace sidebar to enter a prompt, generate code and run the verifier.</p>
         </section>
       ) : null}
 
-      <section className="workspace">
-        <div className="flow-column">
-          <Flowchart graph={payload.flowGraph} selectedNodeId={selectedNodeId} onSelectNode={selectNode} />
-        </div>
-        <NodeDetails node={selectedNode} warnings={payload.warnings} />
-        <WarningPanel warnings={payload.warnings} />
-      </section>
+      {payload ? (
+        <>
+          {payload.flowGraph.nodes.length === 0 ? (
+            <section className="empty-state">
+              <h2>No semantic steps found</h2>
+              <p>Open a Python analysis file and run IntentTrace again.</p>
+            </section>
+          ) : null}
+
+          <section className="workspace">
+            <div className="flow-column">
+              <Flowchart graph={payload.flowGraph} selectedNodeId={selectedNodeId} onSelectNode={selectNode} />
+            </div>
+            <NodeDetails node={selectedNode} warnings={payload.warnings} />
+            <WarningPanel warnings={payload.warnings} />
+          </section>
+        </>
+      ) : null}
     </main>
   );
 }
 
-function shortName(value: string): string {
-  return value.replace(/\\/g, '/').split('/').pop() ?? value;
+interface MessageHandlers {
+  setWorkflowState: (state: WorkflowState) => void;
+  setStatusMessage: (message: string) => void;
+  setSchema?: (schema: DatasetSchema) => void;
+  setIntentJson?: (intentJson: string) => void;
+  setGeneratedCodePath?: (codePath: string) => void;
+  setPayload?: (payload: AnalysisPayload) => void;
+  onPayload?: (payload: AnalysisPayload) => void;
 }
 
-function stateTitle(state: 'fixture' | 'loading' | 'ready' | 'error'): string {
-  if (state === 'loading') {
-    return 'Analyzing code';
+function useIntentTraceMessages(handlers: MessageHandlers): void {
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'workflowStatus') {
+        handlers.setWorkflowState(event.data.message ? 'loading' : 'idle');
+        handlers.setStatusMessage(event.data.message || '');
+        return;
+      }
+
+      if (event.data?.type === 'workflowInfo') {
+        handlers.setWorkflowState('idle');
+        handlers.setStatusMessage(event.data.message || '');
+        return;
+      }
+
+      if (event.data?.type === 'workflowError') {
+        handlers.setWorkflowState('error');
+        handlers.setStatusMessage(event.data.message || 'IntentTrace failed.');
+        return;
+      }
+
+      if (event.data?.type === 'schemaSelected' && handlers.setSchema) {
+        const nextSchema = event.data.schema as DatasetSchema;
+        handlers.setSchema(nextSchema);
+        handlers.setWorkflowState('idle');
+        handlers.setStatusMessage(`Loaded schema from ${shortName(nextSchema.sourcePath)}.`);
+        return;
+      }
+
+      if (event.data?.type === 'intentReady' && handlers.setIntentJson && handlers.setSchema) {
+        const intent = event.data.intent as IntentDSL;
+        handlers.setIntentJson(JSON.stringify(intent, null, 2));
+        handlers.setSchema(intent.dataset);
+        handlers.setWorkflowState('idle');
+        handlers.setStatusMessage('Intent inferred. Review or edit the JSON before generating code or verifying.');
+        return;
+      }
+
+      if (event.data?.type === 'codeGenerated' && handlers.setGeneratedCodePath) {
+        handlers.setGeneratedCodePath(event.data.codeFilePath || '');
+        handlers.setWorkflowState('idle');
+        handlers.setStatusMessage(`Generated code saved to ${shortName(event.data.codeFilePath || '')}.`);
+        return;
+      }
+
+      if (event.data?.type === 'analysisLoading') {
+        handlers.setWorkflowState('loading');
+        handlers.setStatusMessage(event.data.message || 'Running analyzer...');
+        return;
+      }
+
+      if (event.data?.type === 'analysisError') {
+        handlers.setWorkflowState('error');
+        handlers.setStatusMessage(event.data.message || 'Analyzer failed.');
+        return;
+      }
+
+      if (event.data?.type !== 'analysisResult' || !handlers.setPayload) {
+        return;
+      }
+
+      const nextPayload = event.data.payload as AnalysisPayload;
+      handlers.setPayload(nextPayload);
+      handlers.onPayload?.(nextPayload);
+      handlers.setWorkflowState('idle');
+      handlers.setStatusMessage('Verification complete.');
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [handlers]);
+}
+
+function parseIntent(value: string): { intent: IntentDSL | null; error: string | null } {
+  if (!value.trim()) {
+    return { intent: null, error: null };
   }
-  if (state === 'error') {
-    return 'Analyzer error';
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!isIntent(parsed)) {
+      return { intent: null, error: 'Intent must include prompt and dataset fields.' };
+    }
+    return { intent: parsed, error: null };
+  } catch (error) {
+    return { intent: null, error: error instanceof Error ? error.message : String(error) };
   }
-  if (state === 'fixture') {
-    return 'Demo preview';
-  }
-  return '';
+}
+
+function isIntent(value: unknown): value is IntentDSL {
+  return typeof value === 'object'
+    && value !== null
+    && !Array.isArray(value)
+    && typeof (value as { prompt?: unknown }).prompt === 'string'
+    && isDatasetSchema((value as { dataset?: unknown }).dataset);
+}
+
+function isDatasetSchema(value: unknown): value is DatasetSchema {
+  return typeof value === 'object'
+    && value !== null
+    && !Array.isArray(value)
+    && typeof (value as { sourcePath?: unknown }).sourcePath === 'string'
+    && Array.isArray((value as { columns?: unknown }).columns);
+}
+
+function shortName(value: string): string {
+  return value.replace(/\\/g, '/').split('/').pop() ?? value;
 }
 
 createRoot(document.getElementById('root') as HTMLElement).render(<App />);

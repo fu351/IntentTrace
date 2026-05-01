@@ -15,6 +15,7 @@
     "Other"
   ],
   "activationEvents": [
+    "onView:intenttrace.sidebar",
     "onCommand:intenttrace.start",
     "onCommand:intenttrace.inferIntent",
     "onCommand:intenttrace.generateCode",
@@ -22,10 +23,28 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "intenttrace",
+          "title": "IntentTrace",
+          "icon": "media/intenttrace.svg"
+        }
+      ]
+    },
+    "views": {
+      "intenttrace": [
+        {
+          "id": "intenttrace.sidebar",
+          "name": "IntentTrace",
+          "type": "webview"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "intenttrace.start",
-        "title": "IntentTrace: Start"
+        "title": "IntentTrace: Open Sidebar"
       },
       {
         "command": "intenttrace.inferIntent",
@@ -63,11 +82,14 @@
   },
   "scripts": {
     "build:webview": "vite build --config webview/vite.config.ts",
+    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
     "compile": "tsc -p ./",
-    "compile:all": "npm run build:webview && npm run compile",
+    "compile:all": "npm run clean && npm run build:webview && npm run compile",
     "package:vsix": "npm run compile:all && vsce package -o dist/intenttrace.vsix",
     "install:local": "code --install-extension dist/intenttrace.vsix --force",
-    "test": "python -m pytest analyzer/tests",
+    "test": "npm run test:analyzer && npm run test:extension-smoke",
+    "test:analyzer": "python -m pytest analyzer/tests",
+    "test:extension-smoke": "node scripts/verify-extension-smoke.js",
     "watch": "tsc -watch -p ./",
     "vscode:prepublish": "npm run compile:all"
   },

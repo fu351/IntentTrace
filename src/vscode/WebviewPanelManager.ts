@@ -23,16 +23,17 @@ export class WebviewPanelManager implements vscode.Disposable {
 
   public open(): void {
     if (this.panel) {
-      this.panel.reveal(vscode.ViewColumn.One);
+      this.panel.reveal(vscode.ViewColumn.Beside);
       return;
     }
 
     this.panel = vscode.window.createWebviewPanel(
       'intenttrace.verificationView',
       'IntentTrace',
-      vscode.ViewColumn.One,
+      vscode.ViewColumn.Beside,
       {
         enableScripts: true,
+        retainContextWhenHidden: true,
         localResourceRoots: [
           vscode.Uri.joinPath(this.extensionUri, 'webview', 'dist')
         ]
@@ -58,6 +59,14 @@ export class WebviewPanelManager implements vscode.Disposable {
   public showAnalysis(payload: WebviewAnalysisPayload): void {
     this.analysisPayload = payload;
     this.open();
+    this.panel?.webview.postMessage({
+      type: 'analysisResult',
+      payload
+    });
+  }
+
+  public setAnalysis(payload: WebviewAnalysisPayload): void {
+    this.analysisPayload = payload;
     this.panel?.webview.postMessage({
       type: 'analysisResult',
       payload
@@ -90,7 +99,9 @@ export class WebviewPanelManager implements vscode.Disposable {
       return '';
     }
 
-    const initialPayload = JSON.stringify(this.analysisPayload ?? null).replace(/</g, '\\u003c');
+    const initialState = JSON.stringify({
+      analysisPayload: this.analysisPayload
+    }).replace(/</g, '\\u003c');
     const nonce = getNonce();
     const scriptUri = this.panel.webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, 'webview', 'dist', 'assets', 'index.js')
@@ -110,7 +121,7 @@ export class WebviewPanelManager implements vscode.Disposable {
 </head>
 <body>
   <div id="root"></div>
-  <script nonce="${nonce}">window.__INTENTTRACE_INITIAL_DATA__ = ${initialPayload};</script>
+  <script nonce="${nonce}">window.__INTENTTRACE_VIEW_KIND__ = 'results'; window.__INTENTTRACE_INITIAL_STATE__ = ${initialState};</script>
   <script nonce="${nonce}" type="module" src="${scriptUri}"></script>
 </body>
 </html>`;

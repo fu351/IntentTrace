@@ -52,19 +52,28 @@ export class VSCodeLMProvider implements LLMProvider {
   }
 
   private async selectModel(): Promise<vscode.LanguageModelChat> {
+    if (!vscode.lm || typeof vscode.lm.selectChatModels !== 'function') {
+      throw new Error('The VS Code Language Model API is not available in this VS Code build. Update VS Code and sign in to a language model provider such as GitHub Copilot.');
+    }
+
     const configuredModel = vscode.workspace.getConfiguration('intenttrace').get<string>('languageModel');
     const selectors: vscode.LanguageModelChatSelector[] = configuredModel
       ? [{ id: configuredModel }]
       : [{ vendor: 'copilot' }, {}];
 
     for (const selector of selectors) {
-      const models = await vscode.lm.selectChatModels(selector);
+      let models: vscode.LanguageModelChat[];
+      try {
+        models = await vscode.lm.selectChatModels(selector);
+      } catch (error) {
+        throw new Error(`VS Code could not list language models: ${error instanceof Error ? error.message : String(error)}`);
+      }
       if (models.length > 0) {
         return models[0];
       }
     }
 
-    throw new Error('No VS Code language model is available. Sign in to a VS Code language model provider such as GitHub Copilot and try again.');
+    throw new Error('No VS Code language model is available. Sign in to GitHub Copilot or another VS Code language model provider, then try Infer Intent again.');
   }
 }
 
