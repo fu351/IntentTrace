@@ -1,3 +1,28 @@
+export interface DatasetColumn {
+  name: string;
+  type: 'string' | 'number' | 'boolean' | 'date' | 'unknown';
+  nullable: boolean;
+  sampleValues?: unknown[];
+}
+
+export interface DatasetSchema {
+  sourcePath: string;
+  columns: DatasetColumn[];
+  rowCount?: number;
+}
+
+export interface IntentDSL {
+  id?: string;
+  prompt: string;
+  dataset: DatasetSchema;
+  groupBy?: string[];
+  measure?: string;
+  aggregation?: string;
+  chartType?: string;
+  operations?: string[];
+  expectedVisualization?: Record<string, unknown>;
+}
+
 export interface SourceSpan {
   filePath: string;
   startLine: number;
@@ -54,6 +79,15 @@ export interface AnalysisPayload {
   warnings: VerificationWarning[];
 }
 
+export interface InitialState {
+  datasetSchema?: DatasetSchema;
+  intent?: IntentDSL;
+  prompt?: string;
+  generatedCodePath?: string;
+  analysisPayload?: AnalysisPayload;
+  statusMessage?: string;
+}
+
 interface VsCodeApi {
   postMessage(message: unknown): void;
 }
@@ -61,6 +95,8 @@ interface VsCodeApi {
 declare global {
   interface Window {
     acquireVsCodeApi?: () => VsCodeApi;
+    __INTENTTRACE_VIEW_KIND__?: 'sidebar' | 'results';
+    __INTENTTRACE_INITIAL_STATE__?: InitialState;
     __INTENTTRACE_INITIAL_DATA__?: AnalysisPayload | null;
   }
 }
@@ -69,8 +105,58 @@ const vscode = typeof window.acquireVsCodeApi === 'function'
   ? window.acquireVsCodeApi()
   : undefined;
 
-export function getInitialPayload(): AnalysisPayload | null {
-  return window.__INTENTTRACE_INITIAL_DATA__ ?? null;
+export function getInitialState(): InitialState {
+  if (window.__INTENTTRACE_INITIAL_STATE__) {
+    return window.__INTENTTRACE_INITIAL_STATE__;
+  }
+  return window.__INTENTTRACE_INITIAL_DATA__
+    ? { analysisPayload: window.__INTENTTRACE_INITIAL_DATA__ }
+    : {};
+}
+
+export function getViewKind(): 'sidebar' | 'results' {
+  return window.__INTENTTRACE_VIEW_KIND__ ?? 'results';
+}
+
+export function postPickCsv(): void {
+  vscode?.postMessage({ type: 'pickCsv' });
+}
+
+export function postInferIntent(userPrompt: string, datasetSchema: DatasetSchema): void {
+  vscode?.postMessage({
+    type: 'inferIntent',
+    userPrompt,
+    datasetSchema
+  });
+}
+
+export function postGenerateCode(intent: IntentDSL): void {
+  vscode?.postMessage({
+    type: 'generateCode',
+    intent
+  });
+}
+
+export function postRunVerifier(intent: IntentDSL): void {
+  vscode?.postMessage({
+    type: 'runVerifier',
+    intent
+  });
+}
+
+export function postOpenResultsPanel(): void {
+  vscode?.postMessage({ type: 'openResultsPanel' });
+}
+
+export function postOpenGeneratedCode(): void {
+  vscode?.postMessage({ type: 'openGeneratedCode' });
+}
+
+export function postOpenIntentDocument(intent: IntentDSL): void {
+  vscode?.postMessage({
+    type: 'openIntentDocument',
+    intent
+  });
 }
 
 export function postNodeClicked(nodeId: string): void {

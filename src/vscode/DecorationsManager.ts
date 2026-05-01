@@ -187,7 +187,10 @@ export class DecorationsManager implements vscode.Disposable {
 
     const uri = vscode.Uri.file(this.resolveSpanPath(span.filePath));
     const document = await vscode.workspace.openTextDocument(uri);
-    const editor = await vscode.window.showTextDocument(document, { preview: false });
+    const editor = await vscode.window.showTextDocument(document, {
+      preview: false,
+      viewColumn: vscode.ViewColumn.One
+    });
     const range = this.rangeForSpan(document, span);
     editor.selection = new vscode.Selection(range.start, range.end);
     editor.revealRange(range, vscode.TextEditorRevealType.InCenterIfOutsideViewport);

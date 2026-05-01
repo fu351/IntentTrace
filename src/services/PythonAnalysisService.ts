@@ -8,7 +8,7 @@ import type { VerificationWarning } from '../types/verification';
 
 export interface RunVerifierInput {
   codeFileUri: vscode.Uri;
-  intent: Record<string, unknown>;
+  intent: unknown;
 }
 
 export interface AnalyzerResult {

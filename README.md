@@ -1,12 +1,13 @@
 # IntentTrace
 
-IntentTrace is a VS Code extension for checking whether LLM-generated Python data-analysis code still matches a confirmed intent specification. It combines VS Code's Language Model API for intent/code generation with a deterministic Python analyzer for AST parsing, slicing, semantic lowering, verification warnings and flowgraph rendering.
+IntentTrace is a VS Code sidebar extension for checking whether LLM-generated Python data-analysis code still matches a confirmed intent specification. It combines VS Code's Language Model API for intent/code generation with a deterministic Python analyzer for AST parsing, slicing, semantic lowering, verification warnings and flowgraph rendering.
 
 IntentTrace is intended for local `.vsix` distribution during the project demo. It is not configured for Marketplace publishing.
 
 ## What Is Included
 
-- VS Code commands for starting the IntentTrace webview, inferring intent, generating Python code and running verification.
+- A dedicated IntentTrace sidebar view with prompt input, CSV selection, editable intent JSON, code generation and verification controls.
+- VS Code commands that open or guide users back to the sidebar workflow.
 - A React webview flowchart UI built into `webview/dist`.
 - A Python analyzer under `analyzer/` that runs from the packaged extension folder.
 - Demo files under `demo/` showing wrong aggregation, wrong chart type and vestigial code.
@@ -58,30 +59,42 @@ Option 2, from VS Code:
 
 To reinstall after rebuilding, run `npm run package:vsix` again and then `npm run install:local`.
 
-## Run The Demo
+## Run The Sidebar Workflow
 
 1. Open this cloned repo folder in VS Code.
 2. Install the local VSIX using one of the methods above.
-3. Open `demo/analysis_bad.py`.
-4. Set the workspace setting `intenttrace.intentPath` to:
+3. Open the IntentTrace activity-bar icon, or run `IntentTrace: Open Sidebar` from the Command Palette.
+4. Type a prompt, for example:
 
-```json
-"demo/intent_weather.json"
+```text
+Make a bar chart of average temperature by state.
 ```
 
-You can set it in `.vscode/settings.json` for the workspace:
+5. Choose a CSV file. For the demo, choose `demo/weather.csv`.
+6. Click `Infer Intent`.
+7. Review or edit the generated IntentDSL JSON in the sidebar.
+8. Click `Generate Code` to write generated Python to `.intenttrace/generated_analysis.py`, or open an existing Python analysis file.
+9. Click `Run Verifier` to analyze the active Python file using the intent JSON currently shown in the sidebar.
+10. Use the sidebar's `Open Flowchart Results`, `Open Generated Code` and `Open Intent JSON` buttons to open the larger editor panels.
 
-```json
-{
-  "intenttrace.intentPath": "demo/intent_weather.json"
-}
-```
+The sidebar is the control surface. The semantic flowchart, node details and warning list open in a floating editor webview so there is enough room to inspect the result. The LLM is only used for `Infer Intent` and `Generate Code`. Verification results are produced by the deterministic Python analyzer.
 
-5. Run `IntentTrace: Run Verifier` from the Command Palette.
+## Run The Existing Bad-Code Demo
+
+1. Open this cloned repo folder in VS Code.
+2. Install the local VSIX using one of the methods above.
+3. Open the IntentTrace sidebar.
+4. Enter the prompt `Make a bar chart of average temperature by state.`
+5. Choose `demo/weather.csv`.
+6. Click `Infer Intent`, then edit the intent JSON if needed so it asks for `aggregation: "mean"` and `chartType: "bar"`.
+7. Open `demo/analysis_bad.py`.
+8. Click `Run Verifier` in the sidebar.
+
+Command Palette entries remain available, but the intended workflow is the sidebar. They focus the sidebar and explain the next step instead of asking for JSON files.
 
 Expected demo result:
 
-- The IntentTrace webview opens with a semantic flowchart.
+- The IntentTrace flowchart results panel opens with a semantic flowchart.
 - The relevant slice includes reading the CSV, dropping missing values, grouping by state, counting temperature and plotting.
 - Backup, print and unrelated humidity analysis nodes are dimmed as vestigial.
 - Warnings show wrong aggregation because the code uses `count` instead of `mean`.
@@ -90,10 +103,10 @@ Expected demo result:
 
 ## Commands
 
-- `IntentTrace: Start` opens the verification webview.
-- `IntentTrace: Infer Intent` uses the VS Code Language Model API to convert a prompt and dataset schema into editable IntentDSL JSON.
-- `IntentTrace: Generate Code` uses the VS Code Language Model API to generate starter Python code from confirmed IntentDSL.
-- `IntentTrace: Run Verifier` runs the packaged Python analyzer on the active Python file and sends the results to the webview.
+- `IntentTrace: Open Sidebar` opens the IntentTrace sidebar view.
+- `IntentTrace: Infer Intent` opens the sidebar and points users to the prompt plus CSV workflow.
+- `IntentTrace: Generate Code` opens the sidebar and points users to the current editable IntentDSL JSON.
+- `IntentTrace: Run Verifier` opens the sidebar and points users to the verifier button so the current sidebar intent is used.
 
 ## Useful Developer Commands
 
@@ -103,6 +116,7 @@ npm run compile:all
 npm run package:vsix
 npm run install:local
 npm test
+node scripts/verify-extension-smoke.js
 python analyzer/main.py verify --code demo/analysis_bad.py --intent demo/intent_weather.json
 ```
 
@@ -114,3 +128,4 @@ python analyzer/main.py verify --code demo/analysis_bad.py --intent demo/intent_
 - You do not need an OpenAI or Anthropic API key.
 - If `IntentTrace: Infer Intent` or `IntentTrace: Generate Code` reports that no language model is available, sign in to a VS Code Language Model provider and try again.
 - If `IntentTrace: Run Verifier` cannot find Python, make sure Python 3 is available from your terminal as `python`, `python3` or `py -3`.
+- In the normal sidebar workflow, the only file picker is for CSV input.

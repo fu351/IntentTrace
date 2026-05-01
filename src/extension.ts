@@ -1,31 +1,49 @@
 import * as vscode from 'vscode';
-import { registerGenerateCodeCommand } from './commands/generateCode';
-import { registerInferIntentCommand } from './commands/inferIntent';
-import { registerRunVerifierCommand } from './commands/runVerifier';
+import { CsvSchemaService } from './services/CsvSchemaService';
 import { LLMProviderFactory } from './services/llm/LLMProviderFactory';
 import { PythonAnalysisService } from './services/PythonAnalysisService';
 import { DecorationsManager } from './vscode/DecorationsManager';
+import { IntentTraceSidebarProvider } from './vscode/IntentTraceSidebarProvider';
 import { WebviewPanelManager } from './vscode/WebviewPanelManager';
 
 export function activate(context: vscode.ExtensionContext): void {
   const decorationsManager = new DecorationsManager();
-  const webviewPanelManager = new WebviewPanelManager(context.extensionUri, {
+  const analysisService = new PythonAnalysisService(context.extensionUri);
+  const schemaService = new CsvSchemaService();
+  const llmProvider = new LLMProviderFactory().createDefaultProvider();
+  const resultPanelManager = new WebviewPanelManager(context.extensionUri, {
     onNodeClicked: (nodeId) => decorationsManager.revealNode(nodeId),
     onWarningClicked: (warningId) => decorationsManager.revealWarning(warningId)
   });
-  const analysisService = new PythonAnalysisService(context.extensionUri);
-  const llmProvider = new LLMProviderFactory().createDefaultProvider();
+  const sidebarProvider = new IntentTraceSidebarProvider(
+    context,
+    llmProvider,
+    schemaService,
+    analysisService,
+    decorationsManager,
+    resultPanelManager
+  );
 
   const startCommand = vscode.commands.registerCommand('intenttrace.start', () => {
-    webviewPanelManager.open();
+    sidebarProvider.open();
   });
-  const inferIntentCommand = registerInferIntentCommand(llmProvider);
-  const generateCodeCommand = registerGenerateCodeCommand(llmProvider);
-  const runVerifierCommand = registerRunVerifierCommand(
-    context,
-    analysisService,
-    webviewPanelManager,
-    decorationsManager
+  const inferIntentCommand = vscode.commands.registerCommand('intenttrace.inferIntent', () => {
+    sidebarProvider.showGuidance('Use the sidebar prompt and Choose CSV first, then click Infer Intent.');
+  });
+  const generateCodeCommand = vscode.commands.registerCommand('intenttrace.generateCode', () => {
+    sidebarProvider.showGuidance('Use the sidebar Confirmed Intent JSON, then click Generate Code.');
+  });
+  const runVerifierCommand = vscode.commands.registerCommand('intenttrace.runVerifier', () => {
+    sidebarProvider.showGuidance('Use the sidebar Run Verifier button so IntentTrace can use the current intent JSON without asking for a file.');
+  });
+  const sidebarRegistration = vscode.window.registerWebviewViewProvider(
+    IntentTraceSidebarProvider.viewType,
+    sidebarProvider,
+    {
+      webviewOptions: {
+        retainContextWhenHidden: true
+      }
+    }
   );
 
   context.subscriptions.push(
@@ -33,7 +51,9 @@ export function activate(context: vscode.ExtensionContext): void {
     inferIntentCommand,
     generateCodeCommand,
     runVerifierCommand,
-    webviewPanelManager,
+    sidebarRegistration,
+    sidebarProvider,
+    resultPanelManager,
     decorationsManager
   );
 }
