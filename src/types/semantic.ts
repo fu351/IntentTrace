@@ -12,6 +12,7 @@ export interface SemanticOperation {
     | 'Sort'
     | 'ParseDate'
     | 'Plot'
+    | 'PlotFormatting'
     | 'Unknown';
   inputs: string[];
   outputs: string[];

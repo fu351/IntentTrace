@@ -6,7 +6,7 @@ IntentTrace is intended for local `.vsix` distribution during the project demo. 
 
 ## What Is Included
 
-- A dedicated IntentTrace sidebar view with prompt input, CSV selection, editable intent JSON, code generation and verification controls.
+- A dedicated IntentTrace sidebar view with prompt input, CSV selection, a plain-language editable intent form, code generation and verification controls.
 - VS Code commands that open or guide users back to the sidebar workflow.
 - A React webview flowchart UI built into `webview/dist`.
 - A Python analyzer under `analyzer/` that runs from the packaged extension folder.
@@ -72,10 +72,10 @@ Make a bar chart of average temperature by state.
 
 5. Choose a CSV file. For the demo, choose `demo/weather.csv`.
 6. Click `Infer Intent`.
-7. Review or edit the generated IntentDSL JSON in the sidebar.
+7. Review or edit the generated intent fields in the sidebar.
 8. Click `Generate Code` to write generated Python to `.intenttrace/generated_analysis.py`, or open an existing Python analysis file.
 9. Click `Run Verifier` to analyze the active Python file using the intent JSON currently shown in the sidebar.
-10. Use the sidebar's `Open Flowchart Results`, `Open Generated Code` and `Open Intent JSON` buttons to open the larger editor panels.
+10. Use the sidebar's `Open Flowchart Results`, `Open Generated Code` and `Open Technical Intent` buttons to open the larger editor panels.
 
 The sidebar is the control surface. The semantic flowchart, node details and warning list open in a floating editor webview so there is enough room to inspect the result. The LLM is only used for `Infer Intent` and `Generate Code`. Verification results are produced by the deterministic Python analyzer.
 
@@ -105,7 +105,7 @@ Expected demo result:
 
 - `IntentTrace: Open Sidebar` opens the IntentTrace sidebar view.
 - `IntentTrace: Infer Intent` opens the sidebar and points users to the prompt plus CSV workflow.
-- `IntentTrace: Generate Code` opens the sidebar and points users to the current editable IntentDSL JSON.
+- `IntentTrace: Generate Code` opens the sidebar and points users to the current editable intent fields.
 - `IntentTrace: Run Verifier` opens the sidebar and points users to the verifier button so the current sidebar intent is used.
 
 ## Useful Developer Commands

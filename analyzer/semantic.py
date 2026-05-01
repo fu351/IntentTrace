@@ -17,6 +17,25 @@ PLOT_CHART_TYPES = {
   "matplotlib.pyplot.hist": "histogram",
 }
 
+PLOT_FORMATTING_CALLS = {
+  "plt.xlabel": ("xLabel", "Label x-axis", "Label the horizontal axis"),
+  "plt.ylabel": ("yLabel", "Label y-axis", "Label the vertical axis"),
+  "plt.title": ("title", "Set chart title", "Set the chart title"),
+  "plt.legend": ("legend", "Show legend", "Show a legend for the chart"),
+  "plt.xticks": ("xTicks", "Format x-axis ticks", "Adjust the horizontal-axis tick labels"),
+  "plt.yticks": ("yTicks", "Format y-axis ticks", "Adjust the vertical-axis tick labels"),
+  "plt.tight_layout": ("layout", "Tighten chart layout", "Adjust spacing so chart labels fit"),
+  "plt.grid": ("grid", "Set chart grid", "Turn chart grid lines on or off"),
+  "matplotlib.pyplot.xlabel": ("xLabel", "Label x-axis", "Label the horizontal axis"),
+  "matplotlib.pyplot.ylabel": ("yLabel", "Label y-axis", "Label the vertical axis"),
+  "matplotlib.pyplot.title": ("title", "Set chart title", "Set the chart title"),
+  "matplotlib.pyplot.legend": ("legend", "Show legend", "Show a legend for the chart"),
+  "matplotlib.pyplot.xticks": ("xTicks", "Format x-axis ticks", "Adjust the horizontal-axis tick labels"),
+  "matplotlib.pyplot.yticks": ("yTicks", "Format y-axis ticks", "Adjust the vertical-axis tick labels"),
+  "matplotlib.pyplot.tight_layout": ("layout", "Tighten chart layout", "Adjust spacing so chart labels fit"),
+  "matplotlib.pyplot.grid": ("grid", "Set chart grid", "Turn chart grid lines on or off"),
+}
+
 
 def lower_to_semantic_operations(slice_result: SliceResult) -> list[SemanticOperation]:
   operations: list[SemanticOperation] = []
@@ -24,9 +43,74 @@ def lower_to_semantic_operations(slice_result: SliceResult) -> list[SemanticOper
 
   for node in slice_result.nodes:
     lowered = _lower_node(node, node.node_id in relevant_node_ids)
-    operations.extend(_with_op_ids(lowered, start=len(operations) + 1))
+    operations.extend(lowered)
 
-  return operations
+  return _with_op_ids(_coalesce_plot_formatting(operations), start=1)
+
+
+def _coalesce_plot_formatting(operations: list[SemanticOperation]) -> list[SemanticOperation]:
+  coalesced: list[SemanticOperation] = []
+  pending: list[SemanticOperation] = []
+
+  def flush_pending() -> None:
+    if not pending:
+      return
+    coalesced.append(_combined_plot_formatting(pending) if len(pending) > 1 else pending[0])
+    pending.clear()
+
+  for operation in operations:
+    if operation.kind == "PlotFormatting":
+      pending.append(operation)
+      continue
+
+    flush_pending()
+    coalesced.append(operation)
+
+  flush_pending()
+  return coalesced
+
+
+def _combined_plot_formatting(operations: list[SemanticOperation]) -> SemanticOperation:
+  formats = [
+    {
+      "formatType": operation.params.get("formatType"),
+      "value": operation.params.get("value"),
+      "callName": operation.params.get("callName"),
+    }
+    for operation in operations
+  ]
+  values = {
+    str(item["formatType"]): item["value"]
+    for item in formats
+    if item.get("formatType") and item.get("value") is not None
+  }
+  format_types = [
+    str(item["formatType"])
+    for item in formats
+    if item.get("formatType")
+  ]
+  return SemanticOperation(
+    op_id="",
+    kind="PlotFormatting",
+    label="Plot formatting",
+    lay_description=_plot_formatting_description(format_types),
+    source_node_ids=[
+      node_id
+      for operation in operations
+      for node_id in operation.source_node_ids
+    ],
+    source_spans=[
+      span
+      for operation in operations
+      for span in operation.source_spans
+    ],
+    params={
+      "formats": formats,
+      "values": values,
+      "formatTypes": format_types,
+    },
+    in_slice=any(operation.in_slice for operation in operations),
+  )
 
 
 def _with_op_ids(operations: list[SemanticOperation], start: int) -> list[SemanticOperation]:
@@ -70,6 +154,10 @@ def _lower_node(node: ProgramNode, in_slice: bool) -> list[SemanticOperation]:
   plot = _find_call(ast_node, set(PLOT_CHART_TYPES))
   if plot is not None:
     return [_plot_operation(node, plot, in_slice)]
+
+  plot_formatting = _find_call(ast_node, set(PLOT_FORMATTING_CALLS))
+  if plot_formatting is not None:
+    return [_plot_formatting_operation(node, plot_formatting, in_slice)]
 
   show_plot = _find_call(ast_node, {"plt.show", "matplotlib.pyplot.show"})
   if show_plot is not None:
@@ -155,6 +243,24 @@ def _plot_operation(node: ProgramNode, call: ast.Call, in_slice: bool) -> Semant
       "callName": call_name,
       "variablesUsed": _variables_used_in_call(call),
       "columnsUsed": columns,
+    },
+  )
+
+
+def _plot_formatting_operation(node: ProgramNode, call: ast.Call, in_slice: bool) -> SemanticOperation:
+  call_name = _dotted_name(call.func) or "plot formatting"
+  format_type, label, description = PLOT_FORMATTING_CALLS[call_name]
+  value = _first_string_argument(call)
+  return _operation(
+    kind="PlotFormatting",
+    label=label,
+    lay_description=f'{description} as "{value}".' if value else f"{description}.",
+    node=node,
+    in_slice=in_slice,
+    params={
+      "formatType": format_type,
+      "value": value,
+      "callName": call_name,
     },
   )
 
@@ -394,6 +500,24 @@ def _chart_label(chart_type: str) -> str:
     "histogram": "Histogram",
   }
   return labels.get(chart_type, chart_type.capitalize())
+
+
+def _plot_formatting_description(format_types: list[str]) -> str:
+  labels = {
+    "xLabel": "x-axis label",
+    "yLabel": "y-axis label",
+    "title": "title",
+    "legend": "legend",
+    "xTicks": "x-axis ticks",
+    "yTicks": "y-axis ticks",
+    "layout": "layout",
+    "grid": "grid",
+  }
+  readable = [
+    labels.get(format_type, format_type)
+    for format_type in format_types
+  ]
+  return f"Set the chart {_human_list(readable)}."
 
 
 def _unknown_label_and_description(node: ProgramNode) -> tuple[str, str]:

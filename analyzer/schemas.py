@@ -95,6 +95,7 @@ class SemanticOperation:
     "Sort",
     "ParseDate",
     "Plot",
+    "PlotFormatting",
     "Unknown",
   ]
   label: str
@@ -121,6 +122,9 @@ class VerificationWarning:
     "wrong_chart_type",
     "wrong_grouping",
     "wrong_measure",
+    "wrong_x_label",
+    "wrong_y_label",
+    "wrong_title",
     "vestigial_code",
     "ambiguous_target_output",
     "unsupported_pattern",

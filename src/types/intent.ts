@@ -13,6 +13,9 @@ export interface IntentDSL {
     chartType?: string;
     x?: string;
     y?: string;
+    xLabel?: string;
+    yLabel?: string;
+    title?: string;
     groupBy?: string[];
   };
 }

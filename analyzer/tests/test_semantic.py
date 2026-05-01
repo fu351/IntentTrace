@@ -58,6 +58,33 @@ def test_plot_lowers_to_line_plot_with_source_metadata() -> None:
   assert plot_op.in_slice is True
 
 
+def test_plot_formatting_lowers_to_semantic_nodes() -> None:
+  nodes = parse_program(ANALYZER_DIR / "fixtures" / "plot_formatting_example.py")
+  slice_result = SliceResult(
+    criterion=SlicingCriterion(),
+    nodes=nodes,
+    relevant_node_ids=[node.node_id for node in nodes],
+  )
+
+  operations = lower_to_semantic_operations(slice_result)
+  formatting_ops = [
+    operation
+    for operation in operations
+    if operation.kind == "PlotFormatting"
+  ]
+
+  assert len(formatting_ops) == 1
+  assert formatting_ops[0].label == "Plot formatting"
+  assert formatting_ops[0].params["formatTypes"] == ["xLabel", "yLabel", "title"]
+  assert formatting_ops[0].params["values"] == {
+    "xLabel": "Region",
+    "yLabel": "Count",
+    "title": "Humidity by state",
+  }
+  assert formatting_ops[0].source_node_ids == ["node-6", "node-7", "node-8"]
+  assert formatting_ops[0].source_spans[0].start_line == 7
+
+
 def _lower_all_semantic_fixture():
   nodes = parse_program(ANALYZER_DIR / "fixtures" / "semantic_example.py")
   slice_result = SliceResult(

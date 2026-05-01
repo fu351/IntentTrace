@@ -67,3 +67,37 @@ def test_flowgraph_contains_renderable_nodes_and_statuses() -> None:
   assert len(graph.edges) == len(graph.nodes) - 1
   assert graph.edges[0].source == graph.nodes[0].node_id
   assert graph.edges[0].target == graph.nodes[1].node_id
+
+
+def test_flowgraph_maps_label_warning_to_plot_formatting_node() -> None:
+  nodes = parse_program(ANALYZER_DIR / "fixtures" / "plot_formatting_example.py")
+  slice_result = SliceResult(
+    criterion=SlicingCriterion(),
+    nodes=nodes,
+    relevant_node_ids=[node.node_id for node in nodes],
+  )
+  semantic_ops = lower_to_semantic_operations(slice_result)
+  warnings = verify_semantics(
+    semantic_ops,
+    {
+      "groupBy": ["state"],
+      "measure": "temperature",
+      "expectedVisualization": {
+        "title": "Average temperature by state",
+      },
+    },
+  )
+
+  graph = build_flow_graph(semantic_ops, warnings)
+
+  label_node = next(
+    node
+    for node in graph.nodes
+    if node.kind == "PlotFormatting"
+  )
+
+  assert label_node.title == "Plot formatting"
+  assert label_node.status == "error"
+  assert label_node.warning_ids
+  assert label_node.params["formatTypes"] == ["xLabel", "yLabel", "title"]
+  assert any(warning.kind == "wrong_x_label" for warning in warnings)
