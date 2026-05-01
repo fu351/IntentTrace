@@ -58,10 +58,12 @@ for (const label of [
   'Run Verifier',
   'Open Flowchart Results',
   'Open Generated Code',
-  'Open Intent JSON'
+  'Open Technical Intent'
 ]) {
   assert(appSource.includes(label), `Sidebar button label is missing: ${label}.`);
 }
+assert(appSource.includes('Intent Review'), 'Sidebar should show a plain-language intent review panel.');
+assert(!appSource.includes('Confirmed Intent JSON'), 'Sidebar should not expose raw JSON as the main intent editor.');
 
 assert(sidebarSource.includes("'.intenttrace'"), 'Generated code should be saved under .intenttrace.');
 assert(sidebarSource.includes("'generated_analysis.py'"), 'Generated code filename should be generated_analysis.py.');

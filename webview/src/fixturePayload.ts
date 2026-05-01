@@ -89,12 +89,28 @@ export const fixturePayload: AnalysisPayload = {
       {
         nodeId: 'flow-node-7',
         opId: 'op-7',
+        kind: 'PlotFormatting',
+        title: 'Plot formatting',
+        description: 'Set the chart x-axis label.',
+        status: 'error',
+        sourceNodeIds: ['node-9'],
+        sourceSpans: [{ ...sourceSpan, startLine: 11, endLine: 11 }],
+        warningIds: ['warning-3'],
+        params: {
+          formatTypes: ['xLabel'],
+          values: { xLabel: 'Region' },
+          formats: [{ formatType: 'xLabel', value: 'Region', callName: 'plt.xlabel' }]
+        }
+      },
+      {
+        nodeId: 'flow-node-8',
+        opId: 'op-8',
         kind: 'Unknown',
         title: 'Unsupported statement',
         description: 'This statement is not recognized by the current semantic lowerer.',
         status: 'unsupported',
-        sourceNodeIds: ['node-9'],
-        sourceSpans: [{ ...sourceSpan, startLine: 11, endLine: 11 }],
+        sourceNodeIds: ['node-10'],
+        sourceSpans: [{ ...sourceSpan, startLine: 12, endLine: 12 }],
         warningIds: [],
         params: { astType: 'Expr' }
       }
@@ -105,7 +121,8 @@ export const fixturePayload: AnalysisPayload = {
       { edgeId: 'flow-edge-3', source: 'flow-node-3', target: 'flow-node-4' },
       { edgeId: 'flow-edge-4', source: 'flow-node-4', target: 'flow-node-5' },
       { edgeId: 'flow-edge-5', source: 'flow-node-5', target: 'flow-node-6' },
-      { edgeId: 'flow-edge-6', source: 'flow-node-6', target: 'flow-node-7' }
+      { edgeId: 'flow-edge-6', source: 'flow-node-6', target: 'flow-node-7' },
+      { edgeId: 'flow-edge-7', source: 'flow-node-7', target: 'flow-node-8' }
     ],
     warnings: []
   },
@@ -135,6 +152,19 @@ export const fixturePayload: AnalysisPayload = {
       technicalMessage: 'Sliced Plot operation params.chartType differs from intent.chartType.',
       expected: 'bar',
       actual: 'line'
+    },
+    {
+      warningId: 'warning-3',
+      kind: 'wrong_x_label',
+      severity: 'error',
+      opId: 'op-7',
+      nodeIds: ['node-9'],
+      sourceSpans: [{ ...sourceSpan, startLine: 11, endLine: 11 }],
+      title: 'Wrong x-axis label',
+      userMessage: 'The x-axis label says "Region", but the intent expects "state".',
+      technicalMessage: 'Sliced PlotFormatting operation params.value does not match expected xLabel.',
+      expected: 'state',
+      actual: 'Region'
     }
   ]
 };

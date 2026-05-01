@@ -31,7 +31,7 @@ export function activate(context: vscode.ExtensionContext): void {
     sidebarProvider.showGuidance('Use the sidebar prompt and Choose CSV first, then click Infer Intent.');
   });
   const generateCodeCommand = vscode.commands.registerCommand('intenttrace.generateCode', () => {
-    sidebarProvider.showGuidance('Use the sidebar Confirmed Intent JSON, then click Generate Code.');
+    sidebarProvider.showGuidance('Use the sidebar Intent Review fields, then click Generate Code.');
   });
   const runVerifierCommand = vscode.commands.registerCommand('intenttrace.runVerifier', () => {
     sidebarProvider.showGuidance('Use the sidebar Run Verifier button so IntentTrace can use the current intent JSON without asking for a file.');

@@ -60,3 +60,20 @@ def test_backward_slice_reports_dependency_edges() -> None:
   assert ("node-3", "node-6", "df") in edges
   assert ("node-6", "node-7", "df") in edges
   assert ("node-7", "node-9", "summary") in edges
+
+
+def test_backward_slice_keeps_plot_formatting_with_selected_plot() -> None:
+  nodes = parse_program(ANALYZER_DIR / "fixtures" / "plot_formatting_example.py")
+  sink = select_sink(detect_visualization_sinks(nodes), {"chartType": "bar"})
+  criterion = build_slicing_criterion(sink)
+
+  result = slice_program(nodes, criterion)
+
+  snippets = {node.node_id: node.code_snippet for node in nodes}
+  relevant_snippets = [snippets[node_id] for node_id in result.relevant_node_ids]
+
+  assert 'plt.bar(summary["state"], summary["temperature"])' in relevant_snippets
+  assert 'plt.xlabel("Region")' in relevant_snippets
+  assert 'plt.ylabel("Count")' in relevant_snippets
+  assert 'plt.title("Humidity by state")' in relevant_snippets
+  assert "plt.show()" in relevant_snippets

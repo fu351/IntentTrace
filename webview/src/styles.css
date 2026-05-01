@@ -20,6 +20,11 @@ textarea {
   font: inherit;
 }
 
+input,
+select {
+  font: inherit;
+}
+
 .app-shell {
   min-height: 100vh;
   padding: 12px;
@@ -86,7 +91,9 @@ textarea {
 }
 
 .prompt-input,
-.intent-editor textarea {
+.intent-editor textarea,
+.intent-field input,
+.intent-field select {
   width: 100%;
   resize: vertical;
   border: 1px solid var(--vscode-input-border, var(--vscode-panel-border, #d0d7de));
@@ -166,6 +173,50 @@ textarea {
 .intent-editor {
   display: grid;
   gap: 7px;
+}
+
+.intent-form {
+  display: grid;
+  gap: 10px;
+}
+
+.intent-field {
+  display: grid;
+  gap: 5px;
+}
+
+.intent-field > span,
+.intent-dataset > span {
+  color: var(--vscode-descriptionForeground, #5d646d);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.intent-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.intent-dataset,
+.intent-empty {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--vscode-panel-border, #d0d7de);
+  border-radius: 6px;
+  padding: 9px;
+  background: var(--vscode-editor-background, #ffffff);
+}
+
+.intent-dataset strong,
+.intent-empty span {
+  overflow-wrap: anywhere;
+}
+
+.intent-empty span {
+  color: var(--vscode-descriptionForeground, #5d646d);
+  font-size: 12px;
 }
 
 .section-heading {

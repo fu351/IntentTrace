@@ -82,6 +82,7 @@ function buildInferIntentPrompt(userPrompt: string, datasetSchema: DatasetSchema
     'You are IntentTrace. Convert a user data-analysis request and CSV schema into an editable IntentDSL JSON object.',
     'Return only valid JSON. Do not include markdown.',
     'The JSON must use these top-level fields when inferable: prompt, dataset, groupBy, measure, aggregation, chartType, operations, expectedVisualization.',
+    'When labels are obvious, include expectedVisualization.xLabel, expectedVisualization.yLabel, and expectedVisualization.title.',
     'Do not invent columns that are not present in the schema.',
     'Use simple operation names such as ReadCSV, DropNA, GroupBy, Aggregate, Plot.',
     '',

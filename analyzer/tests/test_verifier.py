@@ -92,6 +92,63 @@ def test_verifier_reports_grouping_measure_vestigial_and_unknown() -> None:
   assert vestigial_warning.op_id == "op-4"
 
 
+def test_verifier_groups_vestigial_code_into_one_note() -> None:
+  warnings = verify_semantics(
+    [
+      _semantic_operation(op_id="op-1", kind="ReadCSV", params={}, in_slice=True),
+      _semantic_operation(op_id="op-2", kind="Unknown", params={}, in_slice=False),
+      _semantic_operation(op_id="op-3", kind="Aggregate", params={}, in_slice=False),
+    ],
+    {},
+  )
+
+  vestigial_warnings = [warning for warning in warnings if warning.kind == "vestigial_code"]
+  assert len(vestigial_warnings) == 1
+  assert vestigial_warnings[0].node_ids == ["node-2", "node-3"]
+  assert "2 steps" in vestigial_warnings[0].user_message
+
+
+def test_verifier_maps_label_mismatches_to_plot_formatting_ops() -> None:
+  warnings = verify_semantics(
+    [
+      _semantic_operation(
+        op_id="op-1",
+        kind="PlotFormatting",
+        params={"formatType": "xLabel", "value": "Region"},
+      ),
+      _semantic_operation(
+        op_id="op-2",
+        kind="PlotFormatting",
+        params={"formatType": "yLabel", "value": "Count"},
+      ),
+      _semantic_operation(
+        op_id="op-3",
+        kind="PlotFormatting",
+        params={"formatType": "title", "value": "Humidity by state"},
+      ),
+    ],
+    {
+      "groupBy": ["state"],
+      "measure": "temperature",
+      "expectedVisualization": {
+        "title": "Average temperature by state",
+      },
+    },
+  )
+
+  warning_kinds = {warning.kind for warning in warnings}
+  assert warning_kinds == {"wrong_x_label", "wrong_y_label", "wrong_title"}
+
+  x_warning = next(warning for warning in warnings if warning.kind == "wrong_x_label")
+  assert x_warning.op_id == "op-1"
+  assert x_warning.node_ids == ["node-1"]
+  assert x_warning.title == "Wrong x-axis label"
+
+  y_warning = next(warning for warning in warnings if warning.kind == "wrong_y_label")
+  assert y_warning.op_id == "op-2"
+  assert y_warning.expected == "temperature"
+
+
 def _semantic_operation(
   *,
   op_id: str,

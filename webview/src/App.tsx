@@ -50,6 +50,14 @@ function SidebarApp() {
   const inferDisabled = workflowState === 'loading' || !prompt.trim() || !schema;
   const actionDisabled = workflowState === 'loading' || !parsedIntent.intent;
   const issueCount = payload?.warnings.filter((warning) => warning.severity !== 'info').length ?? 0;
+  const currentIntent = parsedIntent.intent;
+
+  const updateIntent = (patch: Partial<IntentDSL>) => {
+    if (!currentIntent) {
+      return;
+    }
+    setIntentJson(JSON.stringify({ ...currentIntent, ...patch }, null, 2));
+  };
 
   return (
     <main className="app-shell app-shell--sidebar">
@@ -113,8 +121,8 @@ function SidebarApp() {
           <button type="button" onClick={postOpenGeneratedCode} disabled={!generatedCodePath}>
             Open Generated Code
           </button>
-          <button type="button" onClick={() => parsedIntent.intent ? postOpenIntentDocument(parsedIntent.intent) : undefined} disabled={!parsedIntent.intent}>
-            Open Intent JSON
+          <button type="button" onClick={() => currentIntent ? postOpenIntentDocument(currentIntent) : undefined} disabled={!currentIntent}>
+            Open Technical Intent
           </button>
         </div>
         {payload ? (
@@ -127,17 +135,23 @@ function SidebarApp() {
         )}
       </section>
 
-      <section className="intent-editor" aria-label="Editable intent JSON">
+      <section className="intent-editor" aria-label="Intent review">
         <div className="section-heading">
-          <h2>Confirmed Intent JSON</h2>
-          {parsedIntent.error ? <span className="parse-error">Invalid JSON</span> : null}
+          <h2>Intent Review</h2>
+          {parsedIntent.error ? <span className="parse-error">Needs review</span> : null}
         </div>
-        <textarea
-          rows={12}
-          value={intentJson}
-          onChange={(event) => setIntentJson(event.target.value)}
-          placeholder="Infer intent from a prompt, or paste IntentDSL JSON here."
-        />
+        {currentIntent ? (
+          <IntentForm
+            intent={currentIntent}
+            schema={schema}
+            onChange={updateIntent}
+          />
+        ) : (
+          <div className="intent-empty">
+            <strong>No intent inferred yet</strong>
+            <span>Choose a CSV and click Infer Intent. The result will appear here as editable fields.</span>
+          </div>
+        )}
         {parsedIntent.error ? <p className="error-text">{parsedIntent.error}</p> : null}
       </section>
 
@@ -226,6 +240,145 @@ function ResultsApp() {
   );
 }
 
+interface IntentFormProps {
+  intent: IntentDSL;
+  schema: DatasetSchema | null;
+  onChange: (patch: Partial<IntentDSL>) => void;
+}
+
+function IntentForm({ intent, schema, onChange }: IntentFormProps) {
+  const columns = schema?.columns.map((column) => column.name) ?? intent.dataset.columns.map((column) => column.name);
+  const groupByValue = intent.groupBy?.join(', ') ?? '';
+  const expectedVisualization = intent.expectedVisualization ?? {};
+  const updateExpectedVisualization = (key: string, value: string) => {
+    onChange({
+      expectedVisualization: {
+        ...expectedVisualization,
+        [key]: value || undefined
+      }
+    });
+  };
+
+  return (
+    <div className="intent-form">
+      <label className="intent-field">
+        <span>Request</span>
+        <textarea
+          rows={3}
+          value={intent.prompt}
+          onChange={(event) => onChange({ prompt: event.target.value })}
+          placeholder="Describe the chart or analysis."
+        />
+      </label>
+
+      <label className="intent-field">
+        <span>Group rows by</span>
+        <ColumnInput
+          value={groupByValue}
+          columns={columns}
+          onChange={(value) => onChange({ groupBy: splitColumns(value) })}
+          placeholder="state"
+        />
+      </label>
+
+      <label className="intent-field">
+        <span>Measure</span>
+        <ColumnInput
+          value={intent.measure ?? ''}
+          columns={columns}
+          onChange={(value) => onChange({ measure: value || undefined })}
+          placeholder="temperature"
+        />
+      </label>
+
+      <div className="intent-grid">
+        <label className="intent-field">
+          <span>Calculation</span>
+          <select value={intent.aggregation ?? ''} onChange={(event) => onChange({ aggregation: event.target.value || undefined })}>
+            <option value="">Not specified</option>
+            <option value="mean">Average</option>
+            <option value="count">Count</option>
+            <option value="sum">Total</option>
+            <option value="min">Minimum</option>
+            <option value="max">Maximum</option>
+            <option value="median">Median</option>
+          </select>
+        </label>
+
+        <label className="intent-field">
+          <span>Chart type</span>
+          <select value={intent.chartType ?? ''} onChange={(event) => onChange({ chartType: event.target.value || undefined })}>
+            <option value="">Not specified</option>
+            <option value="bar">Bar chart</option>
+            <option value="line">Line chart</option>
+            <option value="scatter">Scatter plot</option>
+            <option value="histogram">Histogram</option>
+          </select>
+        </label>
+      </div>
+
+      <div className="intent-grid">
+        <label className="intent-field">
+          <span>X-axis label</span>
+          <input
+            value={String(expectedVisualization.xLabel ?? expectedVisualization.x ?? '')}
+            onChange={(event) => updateExpectedVisualization('xLabel', event.target.value)}
+            placeholder={intent.groupBy?.[0] ?? 'State'}
+          />
+        </label>
+
+        <label className="intent-field">
+          <span>Y-axis label</span>
+          <input
+            value={String(expectedVisualization.yLabel ?? expectedVisualization.y ?? '')}
+            onChange={(event) => updateExpectedVisualization('yLabel', event.target.value)}
+            placeholder={intent.measure ?? 'Average temperature'}
+          />
+        </label>
+      </div>
+
+      <label className="intent-field">
+        <span>Chart title</span>
+        <input
+          value={String(expectedVisualization.title ?? '')}
+          onChange={(event) => updateExpectedVisualization('title', event.target.value)}
+          placeholder="Average temperature by state"
+        />
+      </label>
+
+      <div className="intent-dataset">
+        <span>Dataset</span>
+        <strong>{shortName(intent.dataset.sourcePath)}</strong>
+      </div>
+    </div>
+  );
+}
+
+interface ColumnInputProps {
+  value: string;
+  columns: string[];
+  placeholder: string;
+  onChange: (value: string) => void;
+}
+
+function ColumnInput({ value, columns, placeholder, onChange }: ColumnInputProps) {
+  return (
+    <>
+      <input
+        list={`${placeholder}-columns`}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+      />
+      <datalist id={`${placeholder}-columns`}>
+        {columns.map((column) => (
+          <option value={column} key={column} />
+        ))}
+      </datalist>
+    </>
+  );
+}
+
 interface MessageHandlers {
   setWorkflowState: (state: WorkflowState) => void;
   setStatusMessage: (message: string) => void;
@@ -270,7 +423,7 @@ function useIntentTraceMessages(handlers: MessageHandlers): void {
         handlers.setIntentJson(JSON.stringify(intent, null, 2));
         handlers.setSchema(intent.dataset);
         handlers.setWorkflowState('idle');
-        handlers.setStatusMessage('Intent inferred. Review or edit the JSON before generating code or verifying.');
+        handlers.setStatusMessage('Intent inferred. Review or edit the fields before generating code or verifying.');
         return;
       }
 
@@ -323,6 +476,14 @@ function parseIntent(value: string): { intent: IntentDSL | null; error: string |
   } catch (error) {
     return { intent: null, error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+function splitColumns(value: string): string[] | undefined {
+  const columns = value
+    .split(',')
+    .map((column) => column.trim())
+    .filter(Boolean);
+  return columns.length > 0 ? columns : undefined;
 }
 
 function isIntent(value: unknown): value is IntentDSL {

@@ -1,6 +1,43 @@
 from __future__ import annotations
 
+import ast
+
 from schemas import DependencyEdge, ProgramNode, SliceResult, SlicingCriterion, VisualizationSink
+
+PLOT_CALLS = {
+  "plt.plot",
+  "plt.bar",
+  "plt.scatter",
+  "plt.hist",
+  "matplotlib.pyplot.plot",
+  "matplotlib.pyplot.bar",
+  "matplotlib.pyplot.scatter",
+  "matplotlib.pyplot.hist",
+}
+
+PLOT_DISPLAY_CALLS = {
+  "plt.show",
+  "matplotlib.pyplot.show",
+}
+
+PLOT_FORMATTING_CALLS = {
+  "plt.xlabel",
+  "plt.ylabel",
+  "plt.title",
+  "plt.legend",
+  "plt.xticks",
+  "plt.yticks",
+  "plt.tight_layout",
+  "plt.grid",
+  "matplotlib.pyplot.xlabel",
+  "matplotlib.pyplot.ylabel",
+  "matplotlib.pyplot.title",
+  "matplotlib.pyplot.legend",
+  "matplotlib.pyplot.xticks",
+  "matplotlib.pyplot.yticks",
+  "matplotlib.pyplot.tight_layout",
+  "matplotlib.pyplot.grid",
+}
 
 
 def build_slicing_criterion(selected_sink: VisualizationSink | None) -> SlicingCriterion:
@@ -90,15 +127,54 @@ def _associated_display_indexes(
   program_nodes: list[ProgramNode],
   target_index: int,
 ) -> set[int]:
-  next_index = target_index + 1
-  if next_index >= len(program_nodes):
-    return set()
+  associated: set[int] = set()
 
-  next_node = program_nodes[next_index]
-  if next_node.code_snippet.strip() in {"plt.show()", "matplotlib.pyplot.show()"}:
-    return {next_index}
+  for index in range(target_index + 1, len(program_nodes)):
+    node = program_nodes[index]
+    call_names = _top_level_call_names(node)
 
-  return set()
+    if call_names & PLOT_CALLS:
+      break
+
+    if call_names & (PLOT_FORMATTING_CALLS | PLOT_DISPLAY_CALLS):
+      associated.add(index)
+      if call_names & PLOT_DISPLAY_CALLS:
+        break
+      continue
+
+    break
+
+  return associated
+
+
+def _top_level_call_names(node: ProgramNode) -> set[str]:
+  ast_node = node.ast_node
+  if ast_node is None:
+    try:
+      ast_node = ast.parse(node.code_snippet)
+    except SyntaxError:
+      return set()
+
+  names: set[str] = set()
+  for child in ast.walk(ast_node):
+    if isinstance(child, ast.Call):
+      name = _dotted_name(child.func)
+      if name:
+        names.add(name)
+  return names
+
+
+def _dotted_name(node: ast.AST) -> str | None:
+  if isinstance(node, ast.Name):
+    return node.id
+
+  if isinstance(node, ast.Attribute):
+    base_name = _dotted_name(node.value)
+    if base_name is None:
+      return None
+    return f"{base_name}.{node.attr}"
+
+  return None
 
 
 def _dependency_edges(relevant_nodes: list[ProgramNode]) -> list[DependencyEdge]:
