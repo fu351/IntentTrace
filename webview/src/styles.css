@@ -394,6 +394,33 @@ select {
   background: transparent;
 }
 
+/* Mermaid-specific styling overrides for generated SVG nodes */
+.mermaid .node rect {
+  stroke-width: 1px;
+}
+.mermaid .node.relevant rect {
+  fill: color-mix(in srgb, var(--vscode-charts-green, #2da44e) 8%, var(--vscode-editor-background, #ffffff));
+  stroke: var(--vscode-charts-green, #2da44e);
+}
+.mermaid .node.vestigial rect {
+  fill: color-mix(in srgb, var(--vscode-descriptionForeground, #6e7781) 6%, var(--vscode-editor-background, #ffffff));
+  stroke: var(--vscode-descriptionForeground, #6e7781);
+  opacity: 0.7;
+}
+.mermaid .node.warning rect {
+  fill: color-mix(in srgb, var(--vscode-editorWarning-foreground, #9a6700) 8%, var(--vscode-editor-background, #ffffff));
+  stroke: var(--vscode-editorWarning-foreground, #9a6700);
+}
+.mermaid .node.error rect {
+  fill: color-mix(in srgb, var(--vscode-editorError-foreground, #cf222e) 8%, var(--vscode-editor-background, #ffffff));
+  stroke: var(--vscode-editorError-foreground, #cf222e);
+}
+.mermaid .node.unsupported rect {
+  fill: transparent;
+  stroke: var(--vscode-descriptionForeground, #6e7781);
+  stroke-dasharray: 4 4;
+}
+
 .node-kind,
 .warning-kind,
 .node-warning-count {

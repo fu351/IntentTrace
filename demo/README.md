@@ -58,18 +58,3 @@ You should see `wrong_aggregation`, `wrong_chart_type`, and at least one `vestig
 7. With `demo/analysis_bad.py` active, run `IntentTrace: Run Verifier` from the command palette.
 
 The IntentTrace webview should open with the semantic flowchart. Click nodes or warnings to jump to the matching source lines. Error nodes should point to the count aggregation and line chart. Vestigial nodes should be visibly dimmed.
-
-## Presentation path
-
-Use this order for a clean mid-project walkthrough:
-
-1. Show the intent JSON as the user-confirmed specification.
-2. Show the Python file as the generated analysis code.
-3. Run `IntentTrace: Run Verifier`.
-4. In the flowchart, explain the green/relevant path: load data, remove missing values, group by state, count temperature, draw a line chart.
-5. Open the Issues panel and show:
-   - Wrong calculation: the code counts temperature instead of averaging it.
-   - Wrong chart type: the code draws a line chart instead of a bar chart.
-6. Expand the extra-code notes to show vestigial code.
-7. Click the wrong calculation warning to jump to the `count()` line.
-8. Click the wrong chart type warning to jump to the `plt.plot(...)` line.

@@ -7,6 +7,13 @@
   </head>
   <body>
     <div id="root"></div>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>
+      // don't auto-render; the React component will initialize
+      if (window.mermaid) {
+        window.mermaid.initialize({ startOnLoad: false });
+      }
+    </script>
     <script type="module" src="/src/App.tsx"></script>
   </body>
 </html>
