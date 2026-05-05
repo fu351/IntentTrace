@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 from typing import Any
 
+from dataflow import DataflowAnalyzer, Provenance
 from schemas import ProgramNode, VisualizationSink
 
 
@@ -20,16 +21,42 @@ SUPPORTED_CALLS = {
 
 def detect_visualization_sinks(program_nodes: list[ProgramNode]) -> list[VisualizationSink]:
   sinks: list[VisualizationSink] = []
+  analyzer = DataflowAnalyzer()
 
   for node in program_nodes:
     ast_node = node.ast_node or _parse_node_snippet(node)
     if ast_node is None:
       continue
 
-    for call in _iter_supported_plot_calls(ast_node):
+    # Run a small dataflow analysis on the statement to find plot calls and provenance
+    try:
+      module = ast.Module(body=[ast_node], type_ignores=[])
+      df_result = analyzer.analyze(module)
+      candidates = analyzer.find_plot_sinks(module, df_result)
+    except Exception:
+      # Fallback to previous simple iteration on failure
+      candidates = [(call, Provenance(origins=set(), taints=set(), confidence=0.0)) for call in _iter_supported_plot_calls(ast_node)]
+
+    for call, prov in candidates:
       call_name = _dotted_name(call.func)
       if call_name is None:
         continue
+
+      # simple heuristic mapping for unknown dotted names
+      chart_type = SUPPORTED_CALLS.get(call_name)
+      if chart_type is None:
+        lname = call_name.lower()
+        if 'hist' in lname:
+          chart_type = 'histogram'
+        elif 'bar' in lname:
+          chart_type = 'bar'
+        elif 'scatter' in lname:
+          chart_type = 'scatter'
+        elif 'plot' in lname:
+          chart_type = 'line'
+        else:
+          # unknown chart type; skip
+          continue
 
       sinks.append(
         VisualizationSink(
@@ -39,7 +66,9 @@ def detect_visualization_sinks(program_nodes: list[ProgramNode]) -> list[Visuali
           call_name=call_name,
           variables_used=_variables_used_in_call(call),
           columns_used=_columns_used_in_call(call),
-          inferred_chart_type=SUPPORTED_CALLS[call_name],
+          inferred_chart_type=chart_type,
+          provenance_origins=sorted(list(prov.origins)) if prov else [],
+          provenance_confidence=prov.confidence if prov else 0.0,
         )
       )
 
@@ -61,8 +90,9 @@ def select_sink(
     for sink in sinks:
       if sink.inferred_chart_type == intended_chart_type:
         return sink
-
-  return sinks[-1]
+  # fallback: pick the sink with highest provenance_confidence
+  best = max(sinks, key=lambda s: getattr(s, "provenance_confidence", 0.0))
+  return best
 
 
 def _iter_supported_plot_calls(node: ast.AST) -> list[ast.Call]:

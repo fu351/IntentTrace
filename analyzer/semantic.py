@@ -37,12 +37,13 @@ PLOT_FORMATTING_CALLS = {
 }
 
 
-def lower_to_semantic_operations(slice_result: SliceResult) -> list[SemanticOperation]:
+def lower_to_semantic_operations(slice_result: SliceResult, sinks: list | None = None) -> list[SemanticOperation]:
   operations: list[SemanticOperation] = []
   relevant_node_ids = set(slice_result.relevant_node_ids)
+  sinks_by_node = {s.node_id: s for s in (sinks or [])}
 
   for node in slice_result.nodes:
-    lowered = _lower_node(node, node.node_id in relevant_node_ids)
+    lowered = _lower_node(node, node.node_id in relevant_node_ids, sinks_by_node)
     operations.extend(lowered)
 
   return _with_op_ids(_coalesce_plot_formatting(operations), start=1)
@@ -129,7 +130,7 @@ def _with_op_ids(operations: list[SemanticOperation], start: int) -> list[Semant
   ]
 
 
-def _lower_node(node: ProgramNode, in_slice: bool) -> list[SemanticOperation]:
+def _lower_node(node: ProgramNode, in_slice: bool, sinks_by_node: dict[str, "VisualizationSink"] | None = None) -> list[SemanticOperation]:
   ast_node = node.ast_node or _parse_node_snippet(node)
   if ast_node is None:
     return [_unknown_operation(node, in_slice)]
@@ -143,6 +144,22 @@ def _lower_node(node: ProgramNode, in_slice: bool) -> list[SemanticOperation]:
   if dropna is not None:
     return [_dropna_operation(node, dropna, in_slice)]
 
+  select_cols = _find_select_columns(ast_node)
+  if select_cols is not None:
+    return [_select_columns_operation(node, select_cols, in_slice)]
+
+  filter_rows = _find_filter_rows(ast_node)
+  if filter_rows is not None:
+    return [_filter_rows_operation(node, filter_rows, in_slice)]
+
+  sort_call = _find_sort_values(ast_node)
+  if sort_call is not None:
+    return [_sort_operation(node, sort_call, in_slice)]
+
+  parse_date = _find_parse_date(ast_node)
+  if parse_date is not None:
+    return [_parse_date_operation(node, parse_date, in_slice)]
+
   groupby = _find_method_call(ast_node, {"groupby"})
   aggregate = _find_method_call(ast_node, {"mean", "count", "agg"})
   if groupby is not None and aggregate is not None:
@@ -153,7 +170,7 @@ def _lower_node(node: ProgramNode, in_slice: bool) -> list[SemanticOperation]:
 
   plot = _find_call(ast_node, set(PLOT_CHART_TYPES))
   if plot is not None:
-    return [_plot_operation(node, plot, in_slice)]
+    return [_plot_operation(node, plot, in_slice, sinks_by_node)]
 
   plot_formatting = _find_call(ast_node, set(PLOT_FORMATTING_CALLS))
   if plot_formatting is not None:
@@ -228,22 +245,29 @@ def _aggregate_operation(
   )
 
 
-def _plot_operation(node: ProgramNode, call: ast.Call, in_slice: bool) -> SemanticOperation:
+def _plot_operation(node: ProgramNode, call: ast.Call, in_slice: bool, sinks_by_node: dict[str, "VisualizationSink"] | None = None) -> SemanticOperation:
   call_name = _dotted_name(call.func) or "plot"
   chart_type = PLOT_CHART_TYPES[call_name]
   columns = _columns_used_in_call(call)
+  params = {
+    "chartType": chart_type,
+    "callName": call_name,
+    "variablesUsed": _variables_used_in_call(call),
+    "columnsUsed": columns,
+  }
+  # attach provenance if available from sinks
+  if sinks_by_node and node.node_id in sinks_by_node:
+    sink = sinks_by_node[node.node_id]
+    params["provenanceOrigins"] = getattr(sink, "provenance_origins", [])
+    params["provenanceConfidence"] = getattr(sink, "provenance_confidence", 0.0)
+
   return _operation(
     kind="Plot",
     label=f"{_chart_label(chart_type)} chart",
     lay_description=f"Draw a {_chart_label(chart_type).lower()} chart for the selected result.",
     node=node,
     in_slice=in_slice,
-    params={
-      "chartType": chart_type,
-      "callName": call_name,
-      "variablesUsed": _variables_used_in_call(call),
-      "columnsUsed": columns,
-    },
+    params=params,
   )
 
 
@@ -400,6 +424,201 @@ def _constant_string(node: ast.AST) -> str | None:
   if isinstance(node, ast.Constant) and isinstance(node.value, str):
     return node.value
   return None
+
+
+def _find_select_columns(node: ast.AST) -> ast.AST | None:
+  # detect patterns like df[['a','b']] or df.drop(columns=[...])
+  for child in ast.walk(node):
+    # bracket selection with list/tuple of strings: df[['a','b']]
+    if isinstance(child, ast.Subscript):
+      value = child.value
+      if isinstance(value, ast.Name) and isinstance(child.slice, (ast.List, ast.Tuple)):
+        if all(isinstance(el, ast.Constant) and isinstance(el.value, str) for el in child.slice.elts):
+          return child
+
+    # method call .drop(..., axis=1) or .drop(columns=[...])
+    if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute) and child.func.attr == "drop":
+      # check keywords
+      cols = _keyword_string_list(child, "columns")
+      if cols:
+        return child
+      # axis=1 with first arg(s)
+      for kw in child.keywords:
+        if kw.arg == "axis":
+          if isinstance(kw.value, ast.Constant) and kw.value.value == 1:
+            return child
+      # positional first arg could be column name or list
+      if child.args:
+        first = child.args[0]
+        if isinstance(first, (ast.Constant, ast.List, ast.Tuple)):
+          return child
+
+  return None
+
+
+def _find_filter_rows(node: ast.AST) -> ast.AST | None:
+  # detect boolean indexing df[cond] or df.query(...)
+  for child in ast.walk(node):
+    # bracket with condition: df[ something that's not a simple string/list slice ]
+    if isinstance(child, ast.Subscript):
+      # if the slice is a Compare, BoolOp, Call, Name, UnaryOp, etc. treat as filter
+      sl = child.slice
+      if not isinstance(sl, (ast.Constant, ast.List, ast.Tuple)):
+        # avoid column selection which uses Constant or List/Tuple of strings
+        return child
+
+    # df.query('...')
+    if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute) and child.func.attr == "query":
+      return child
+
+  return None
+
+
+def _columns_in_expr(node: ast.AST) -> list[str]:
+  cols: set[str] = set()
+  for child in ast.walk(node):
+    if isinstance(child, ast.Subscript):
+      col = _constant_string(child.slice)
+      if col:
+        cols.add(col)
+  return sorted(cols)
+
+
+def _select_columns_operation(node: ProgramNode, expr: ast.AST, in_slice: bool) -> SemanticOperation:
+  # expr may be a Subscript or a Call (drop)
+  columns: list[str] = []
+  input_name = None
+  if isinstance(expr, ast.Subscript):
+    if isinstance(expr.value, ast.Name):
+      input_name = expr.value.id
+    columns = _string_values(expr.slice) if hasattr(expr, "slice") else []
+  elif isinstance(expr, ast.Call):
+    # drop or other call
+    input_name = _base_object_name(expr) or _base_object_name(expr)
+    columns = _keyword_string_list(expr, "columns") or _string_arguments(expr)
+
+  return _operation(
+    kind="SelectColumns",
+    label=f"Select columns ({_human_list(columns)})" if columns else "Select columns",
+    lay_description=f"Select the columns {_human_list(columns)} from the input." if columns else "Select a subset of columns.",
+    node=node,
+    in_slice=in_slice,
+    params={
+      "columns": columns,
+      "input": input_name,
+      "output": _first_or_none(node.defines),
+    },
+  )
+
+
+def _filter_rows_operation(node: ProgramNode, expr: ast.AST, in_slice: bool) -> SemanticOperation:
+  # expr may be Subscript or Call(query)
+  input_name = None
+  columns: list[str] = []
+  if isinstance(expr, ast.Subscript):
+    if isinstance(expr.value, ast.Name):
+      input_name = expr.value.id
+    columns = _columns_in_expr(expr.slice) if hasattr(expr, "slice") else []
+  elif isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute) and expr.func.attr == "query":
+    input_name = _base_object_name(expr) or None
+    # try to extract columns from string - not reliable; leave empty
+    columns = []
+
+  return _operation(
+    kind="FilterRows",
+    label="Filter rows",
+    lay_description="Keep only rows matching the filter condition.",
+    node=node,
+    in_slice=in_slice,
+    params={
+      "input": input_name,
+      "columns": columns,
+      "astType": node.ast_type,
+    },
+  )
+
+
+def _find_sort_values(node: ast.AST) -> ast.Call | None:
+  for child in ast.walk(node):
+    if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute):
+      if child.func.attr in ("sort_values", "sort_index"):
+        return child
+  return None
+
+
+def _sort_operation(node: ProgramNode, call: ast.Call, in_slice: bool) -> SemanticOperation:
+  # extract 'by' argument (list or string)
+  cols = _keyword_string_list(call, "by") or _string_arguments(call)
+  asc = None
+  for kw in call.keywords:
+    if kw.arg == "ascending" and isinstance(kw.value, ast.Constant):
+      asc = kw.value.value
+
+  input_name = _base_object_name(call) or None
+  return _operation(
+    kind="Sort",
+    label=f"Sort by {_human_list(cols)}" if cols else "Sort",
+    lay_description="Sort the rows by the specified columns.",
+    node=node,
+    in_slice=in_slice,
+    params={
+      "by": cols,
+      "ascending": asc,
+      "input": input_name,
+      "output": _first_or_none(node.defines),
+    },
+  )
+
+
+def _find_parse_date(node: ast.AST) -> ast.Call | None:
+  # detect pd.to_datetime(...) or read_csv(parse_dates=...)
+  for child in ast.walk(node):
+    if isinstance(child, ast.Call):
+      # pd.to_datetime or to_datetime
+      func = child.func
+      if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.attr == "to_datetime":
+        return child
+      if isinstance(func, ast.Name) and func.id == "to_datetime":
+        return child
+      # read_csv(parse_dates=...)
+      if isinstance(func, ast.Attribute) and func.attr == "read_csv":
+        for kw in child.keywords:
+          if kw.arg == "parse_dates":
+            return child
+  return None
+
+
+def _parse_date_operation(node: ProgramNode, call: ast.Call, in_slice: bool) -> SemanticOperation:
+  cols: list[str] = []
+  format_str = None
+  func = call.func
+  # pd.to_datetime(series) -> try to extract column from arg
+  if isinstance(func, ast.Attribute) and func.attr == "to_datetime":
+    if call.args:
+      cols = _columns_in_expr(call.args[0])
+    for kw in call.keywords:
+      if kw.arg == "format" and isinstance(kw.value, ast.Constant):
+        format_str = kw.value.value
+
+  # read_csv(parse_dates=[...])
+  if isinstance(func, ast.Attribute) and func.attr == "read_csv":
+    pdates = _keyword_string_list(call, "parse_dates")
+    if pdates:
+      cols = pdates
+
+  return _operation(
+    kind="ParseDate",
+    label=f"Parse dates ({_human_list(cols)})" if cols else "Parse dates",
+    lay_description="Convert string columns into datetime types.",
+    node=node,
+    in_slice=in_slice,
+    params={
+      "columns": cols,
+      "format": format_str,
+      "input": _base_object_name(call) or None,
+      "output": _first_or_none(node.defines),
+    },
+  )
 
 
 def _measure_column(groupby_call: ast.Call) -> str | None:

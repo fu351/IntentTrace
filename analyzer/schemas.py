@@ -51,6 +51,8 @@ class VisualizationSink:
   variables_used: list[str]
   columns_used: list[str]
   inferred_chart_type: Literal["line", "bar", "scatter", "histogram"]
+  provenance_origins: list[str] = field(default_factory=list)
+  provenance_confidence: float = 0.0
 
   @property
   def span(self) -> SourceSpan:

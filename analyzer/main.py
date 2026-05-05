@@ -71,7 +71,8 @@ def run_verify(
       relevant_node_ids=slice_result.relevant_node_ids,
       irrelevant_node_ids=slice_result.irrelevant_node_ids,
       dependency_edges=slice_result.dependency_edges,
-    )
+    ),
+    sinks,
   )
   warnings = verify_semantics(semantic_ops, intent, schema)
   flow_graph = build_flow_graph(
