@@ -9,18 +9,14 @@ import type { DatasetSchema } from '../types/schema';
 import type { FlowGraph } from '../types/flowchart';
 import type { VerificationWarning } from '../types/verification';
 import { DecorationsManager } from './DecorationsManager';
-import { WebviewPanelManager } from './WebviewPanelManager';
-
-export interface WebviewAnalysisPayload {
-  flowGraph: FlowGraph;
-  warnings: VerificationWarning[];
-}
+import { WebviewPanelManager, type WebviewAnalysisPayload } from './WebviewPanelManager';
 
 interface SidebarState {
   datasetSchema?: DatasetSchema;
   intent?: IntentDSL;
   prompt?: string;
   generatedCodePath?: string;
+  activeCodeFilePath?: string;
   analysisPayload?: WebviewAnalysisPayload;
   statusMessage?: string;
 }
@@ -34,13 +30,19 @@ type SidebarMessage =
   | { type: 'openGeneratedCode' }
   | { type: 'openIntentDocument'; intent: IntentDSL }
   | { type: 'nodeClicked'; nodeId: string }
-  | { type: 'warningClicked'; warningId: string };
+  | { type: 'warningClicked'; warningId: string }
+  | { type: 'fixWarning'; warningId: string }
+  | { type: 'deleteWarningCode'; warningId: string }
+  | { type: 'editIntentForWarning'; warningId: string }
+  | { type: 'ignoreWarning'; warningId: string }
+  | { type: 'applyToProject' };
 
 export class IntentTraceSidebarProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   public static readonly viewType = 'intenttrace.sidebar';
 
   private view: vscode.WebviewView | undefined;
   private state: SidebarState = {};
+  private readonly activeEditorListener: vscode.Disposable;
 
   public constructor(
     private readonly context: vscode.ExtensionContext,
@@ -49,7 +51,11 @@ export class IntentTraceSidebarProvider implements vscode.WebviewViewProvider, v
     private readonly analysisService: PythonAnalysisService,
     private readonly decorationsManager: DecorationsManager,
     private readonly resultPanelManager: WebviewPanelManager
-  ) {}
+  ) {
+    this.activeEditorListener = vscode.window.onDidChangeActiveTextEditor(() => {
+      void this.tryRestoreFileSession();
+    });
+  }
 
   public resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.view = webviewView;
@@ -109,7 +115,32 @@ export class IntentTraceSidebarProvider implements vscode.WebviewViewProvider, v
     });
   }
 
+  public async handleFixWarning(warningId: string): Promise<void> {
+    const warning = this.state.analysisPayload?.warnings.find((w) => w.warningId === warningId);
+    if (!warning) {
+      return;
+    }
+    vscode.window.showInformationMessage(`IntentTrace: Auto-fix for "${warning.title}" is not yet implemented. Edit the code manually, then re-run the verifier.`);
+  }
+
+  public async handleDeleteWarningCode(warningId: string): Promise<void> {
+    try {
+      await this.deleteWarningCode(warningId);
+    } catch (error) {
+      this.postWorkflowError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  public handleEditIntentForWarning(): void {
+    this.open();
+    this.postMessage({
+      type: 'workflowInfo',
+      message: 'Edit the intent fields in the sidebar, then re-run the verifier.'
+    });
+  }
+
   public dispose(): void {
+    this.activeEditorListener.dispose();
     this.view = undefined;
   }
 
@@ -125,6 +156,25 @@ export class IntentTraceSidebarProvider implements vscode.WebviewViewProvider, v
 
     if (message.type === 'warningClicked') {
       await this.decorationsManager.revealWarning(message.warningId);
+      return;
+    }
+
+    if (message.type === 'fixWarning') {
+      await this.handleFixWarning(message.warningId);
+      return;
+    }
+
+    if (message.type === 'editIntentForWarning') {
+      this.handleEditIntentForWarning();
+      return;
+    }
+
+    if (message.type === 'ignoreWarning') {
+      return;
+    }
+
+    if (message.type === 'deleteWarningCode') {
+      await this.handleDeleteWarningCode(message.warningId);
       return;
     }
 
@@ -161,6 +211,10 @@ export class IntentTraceSidebarProvider implements vscode.WebviewViewProvider, v
 
       if (message.type === 'openIntentDocument') {
         await this.openIntentDocument(message.intent);
+      }
+
+      if (message.type === 'applyToProject') {
+        await this.applyToProject();
       }
     } catch (error) {
       this.postWorkflowError(error instanceof Error ? error.message : String(error));
@@ -207,6 +261,7 @@ export class IntentTraceSidebarProvider implements vscode.WebviewViewProvider, v
 
     this.state.intent = intent;
     this.state.statusMessage = 'Intent inferred. Review or edit it before generating code or verifying.';
+    await this.persistSession();
     this.postMessage({
       type: 'intentReady',
       intent
@@ -220,29 +275,51 @@ export class IntentTraceSidebarProvider implements vscode.WebviewViewProvider, v
 
     this.state.intent = intent;
     this.state.datasetSchema = intent.dataset;
-    this.postWorkflowStatus('Generating Python code with the VS Code Language Model API...');
+
+    const activeFilePath = this.resolveActiveCodeFilePath();
+    const existingCode = await this.readExistingCode(activeFilePath);
+    const isModify = existingCode !== undefined;
+
+    this.postWorkflowStatus(
+      isModify
+        ? 'Modifying existing code with the VS Code Language Model API...'
+        : 'Generating Python code with the VS Code Language Model API...'
+    );
 
     const code = await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
-        title: 'Generating Python analysis code',
+        title: isModify ? 'Modifying Python analysis code' : 'Generating Python analysis code',
         cancellable: true
       },
       (_progress, cancellationToken) => this.llmProvider.generateCode({
         intent,
         datasetSchema: intent.dataset,
+        existingCode,
         cancellationToken
       })
     );
 
-    const codeUri = await this.writeGeneratedCode(code);
+    let codeUri: vscode.Uri;
+    if (isModify && activeFilePath) {
+      const normalizedCode = code.endsWith('\n') ? code : `${code}\n`;
+      await fs.writeFile(activeFilePath, normalizedCode, 'utf8');
+      codeUri = vscode.Uri.file(activeFilePath);
+    } else {
+      codeUri = await this.writeGeneratedCode(code);
+    }
+
     this.state.generatedCodePath = codeUri.fsPath;
+    this.state.activeCodeFilePath = codeUri.fsPath;
     const document = await vscode.workspace.openTextDocument(codeUri);
     await vscode.window.showTextDocument(document, {
       preview: false,
       viewColumn: vscode.ViewColumn.One
     });
-    this.state.statusMessage = `Generated code saved to ${path.basename(codeUri.fsPath)}.`;
+    this.state.statusMessage = isModify
+      ? `Code modified in ${path.basename(codeUri.fsPath)}.`
+      : `Generated code saved to ${path.basename(codeUri.fsPath)}.`;
+    await this.persistSession();
     this.postMessage({
       type: 'codeGenerated',
       codeFilePath: codeUri.fsPath
@@ -269,11 +346,14 @@ export class IntentTraceSidebarProvider implements vscode.WebviewViewProvider, v
       () => this.analysisService.runVerifier({ codeFileUri, intent })
     );
 
+    this.state.activeCodeFilePath = codeFileUri.fsPath;
     this.showAnalysis({
       flowGraph: result.flowGraph,
-      warnings: result.warnings
+      warnings: result.warnings,
+      intent: intent as unknown as Record<string, unknown>
     });
     this.decorationsManager.applyAnalysis(result.flowGraph, result.warnings);
+    await this.persistSession();
   }
 
   private openResultsPanel(): void {
@@ -310,6 +390,213 @@ export class IntentTraceSidebarProvider implements vscode.WebviewViewProvider, v
       preview: false,
       viewColumn: vscode.ViewColumn.One
     });
+  }
+
+  private resolveActiveCodeFilePath(): string | undefined {
+    const editor = vscode.window.activeTextEditor;
+    if (editor && editor.document.uri.scheme === 'file' && path.extname(editor.document.uri.fsPath).toLowerCase() === '.py') {
+      return editor.document.uri.fsPath;
+    }
+    return this.state.generatedCodePath ?? this.getDefaultGeneratedCodePath();
+  }
+
+  private async readExistingCode(filePath: string | undefined): Promise<string | undefined> {
+    if (!filePath) {
+      return undefined;
+    }
+    try {
+      const content = await fs.readFile(filePath, 'utf8');
+      return content.trim().length > 0 ? content : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private getDefaultGeneratedCodePath(): string | undefined {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+      return undefined;
+    }
+    return path.join(workspaceFolder.uri.fsPath, '.intenttrace', 'generated_analysis.py');
+  }
+
+  private async applyToProject(): Promise<void> {
+    const activeFile = this.state.activeCodeFilePath ?? this.state.generatedCodePath;
+    if (!activeFile) {
+      throw new Error('Generate and verify code before applying to the project.');
+    }
+
+    const isIntentTraceFile = activeFile.includes('.intenttrace');
+
+    if (!isIntentTraceFile) {
+      const document = await vscode.workspace.openTextDocument(vscode.Uri.file(activeFile));
+      await vscode.window.showTextDocument(document, { preview: false, viewColumn: vscode.ViewColumn.One });
+      await document.save();
+      this.postMessage({
+        type: 'workflowInfo',
+        message: `Saved ${path.basename(activeFile)}.`
+      });
+      return;
+    }
+
+    const sourceCode = await fs.readFile(activeFile, 'utf8');
+    if (!sourceCode.trim()) {
+      throw new Error('The generated code file is empty.');
+    }
+
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    const defaultName = this.state.intent?.prompt
+      ? this.state.intent.prompt.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) + '.py'
+      : 'analysis.py';
+
+    const defaultUri = workspaceFolder
+      ? vscode.Uri.file(path.join(workspaceFolder.uri.fsPath, defaultName))
+      : undefined;
+
+    const targetUri = await vscode.window.showSaveDialog({
+      defaultUri,
+      filters: { Python: ['py'] },
+      saveLabel: 'Apply to project',
+      title: 'Choose where to save the verified analysis'
+    });
+    if (!targetUri) {
+      return;
+    }
+
+    await fs.writeFile(targetUri.fsPath, sourceCode, 'utf8');
+    this.state.activeCodeFilePath = targetUri.fsPath;
+    this.state.generatedCodePath = targetUri.fsPath;
+    const document = await vscode.workspace.openTextDocument(targetUri);
+    await vscode.window.showTextDocument(document, { preview: false, viewColumn: vscode.ViewColumn.One });
+    await this.persistSession();
+    this.postMessage({
+      type: 'workflowInfo',
+      message: `Applied to ${path.basename(targetUri.fsPath)}.`
+    });
+  }
+
+  private async deleteWarningCode(warningId: string): Promise<void> {
+    const payload = this.state.analysisPayload;
+    const intent = this.state.intent;
+    const warning = payload?.warnings.find((w) => w.warningId === warningId);
+    if (!payload || !warning || !intent) {
+      throw new Error('Run the verifier before deleting code.');
+    }
+
+    const spans = warning.sourceSpans.filter((span) => span.startLine > 0);
+    if (spans.length === 0) {
+      throw new Error('This warning does not have source lines to delete.');
+    }
+
+    const filePath = spans[0].filePath || this.state.generatedCodePath;
+    if (!filePath) {
+      throw new Error('This warning does not have a source file.');
+    }
+
+    const targetUri = vscode.Uri.file(filePath);
+    const document = await vscode.workspace.openTextDocument(targetUri);
+
+    const lineCount = spans.reduce((total, span) => total + (span.endLine - span.startLine + 1), 0);
+    const choice = await vscode.window.showWarningMessage(
+      `Delete ${lineCount} line${lineCount === 1 ? '' : 's'} of ${warning.kind.replace(/_/g, ' ')}?`,
+      { modal: true },
+      'Delete'
+    );
+    if (choice !== 'Delete') {
+      return;
+    }
+
+    const edit = new vscode.WorkspaceEdit();
+    const sortedSpans = [...spans].sort((a, b) => b.startLine - a.startLine);
+    for (const span of sortedSpans) {
+      const startLine = Math.max(span.startLine - 1, 0);
+      const endLine = Math.min(span.endLine, document.lineCount);
+      edit.delete(targetUri, new vscode.Range(startLine, 0, endLine, 0));
+    }
+
+    const applied = await vscode.workspace.applyEdit(edit);
+    if (applied) {
+      const updatedDocument = await vscode.workspace.openTextDocument(targetUri);
+      await updatedDocument.save();
+    }
+
+    this.postWorkflowStatus('Code deleted. Rerunning verifier...');
+    await this.runVerifier(intent);
+  }
+
+  private async persistSession(): Promise<void> {
+    const filePath = this.state.activeCodeFilePath ?? this.state.generatedCodePath;
+    if (!filePath) {
+      return;
+    }
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+      return;
+    }
+    const sessionsDir = path.join(workspaceFolder.uri.fsPath, '.intenttrace', 'sessions');
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const sessionPath = path.join(sessionsDir, `${safeFileName(filePath)}.json`);
+    const session = {
+      prompt: this.state.prompt,
+      datasetSchema: this.state.datasetSchema,
+      intent: this.state.intent,
+      generatedCodePath: this.state.generatedCodePath,
+      activeCodeFilePath: this.state.activeCodeFilePath,
+      statusMessage: this.state.statusMessage,
+      updatedAt: new Date().toISOString(),
+    };
+    await fs.writeFile(sessionPath, JSON.stringify(session, null, 2), 'utf8');
+  }
+
+  private async tryRestoreFileSession(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.uri.scheme !== 'file') {
+      return;
+    }
+    const filePath = editor.document.uri.fsPath;
+    if (path.extname(filePath).toLowerCase() !== '.py') {
+      return;
+    }
+    if (filePath === this.state.activeCodeFilePath) {
+      return;
+    }
+
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+      return;
+    }
+
+    const sessionPath = path.join(workspaceFolder.uri.fsPath, '.intenttrace', 'sessions', `${safeFileName(filePath)}.json`);
+    try {
+      const raw = await fs.readFile(sessionPath, 'utf8');
+      const session = JSON.parse(raw);
+      if (!session || !session.intent) {
+        return;
+      }
+
+      this.state = {
+        ...this.state,
+        prompt: session.prompt,
+        datasetSchema: session.datasetSchema,
+        intent: session.intent,
+        generatedCodePath: session.generatedCodePath,
+        activeCodeFilePath: filePath,
+        statusMessage: session.statusMessage,
+      };
+
+      this.postMessage({
+        type: 'sessionRestored',
+        state: {
+          prompt: session.prompt,
+          intent: session.intent,
+          datasetSchema: session.datasetSchema ?? session.intent?.dataset,
+          generatedCodePath: session.generatedCodePath,
+          statusMessage: 'Session restored. Ready to verify.',
+        }
+      });
+    } catch {
+      // No session for this file
+    }
   }
 
   private async writeGeneratedCode(code: string): Promise<vscode.Uri> {
@@ -433,7 +720,7 @@ function isSidebarMessage(value: unknown): value is SidebarMessage {
   if (value.type === 'generateCode' || value.type === 'runVerifier') {
     return isRecord(value.intent);
   }
-  if (value.type === 'openResultsPanel' || value.type === 'openGeneratedCode') {
+  if (value.type === 'openResultsPanel' || value.type === 'openGeneratedCode' || value.type === 'applyToProject') {
     return true;
   }
   if (value.type === 'openIntentDocument') {
@@ -442,7 +729,7 @@ function isSidebarMessage(value: unknown): value is SidebarMessage {
   if (value.type === 'nodeClicked') {
     return typeof value.nodeId === 'string';
   }
-  if (value.type === 'warningClicked') {
+  if (value.type === 'warningClicked' || value.type === 'fixWarning' || value.type === 'deleteWarningCode' || value.type === 'editIntentForWarning' || value.type === 'ignoreWarning') {
     return typeof value.warningId === 'string';
   }
   return false;
@@ -459,4 +746,13 @@ function getNonce(): string {
     nonce += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return nonce;
+}
+
+function safeFileName(filePath: string): string {
+  return filePath
+    .replace(/^[A-Za-z]:/, '')
+    .replace(/[\\/:\s]+/g, '_')
+    .replace(/[^A-Za-z0-9_.-]/g, '_')
+    .replace(/^_+/, '')
+    .slice(-160) || 'active-file';
 }

@@ -1,4 +1,10 @@
 import type { FlowNode, VerificationWarning } from './vscodeApi';
+import {
+  postDeleteWarningCode,
+  postEditIntentForWarning,
+  postFixWarning,
+  postWarningClicked
+} from './vscodeApi';
 
 interface NodeDetailsProps {
   node: FlowNode | null;
@@ -42,6 +48,14 @@ export function NodeDetails({ node, warnings }: NodeDetailsProps) {
             <div className="inline-warning" data-severity={warning.severity} key={warning.warningId}>
               <strong>{warning.title}</strong>
               <p>{warning.userMessage}</p>
+              <div className="warning-actions">
+                <button type="button" onClick={() => postFixWarning(warning.warningId)}>Fix code</button>
+                {(warning.kind === 'vestigial_code' || warning.kind === 'unsupported_pattern') ? (
+                  <button type="button" className="delete-button" onClick={() => postDeleteWarningCode(warning.warningId)}>Delete</button>
+                ) : null}
+                <button type="button" onClick={() => postEditIntentForWarning(warning.warningId)}>Edit intent</button>
+                <button type="button" onClick={() => postWarningClicked(warning.warningId)}>Jump</button>
+              </div>
             </div>
           ))}
         </section>

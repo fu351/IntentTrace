@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 from typing import Any
 
+from dataflow import DataflowResult, TaintKind
 from schemas import ProgramNode, SemanticOperation, SliceResult
 
 
@@ -37,13 +38,13 @@ PLOT_FORMATTING_CALLS = {
 }
 
 
-def lower_to_semantic_operations(slice_result: SliceResult, sinks: list | None = None) -> list[SemanticOperation]:
+def lower_to_semantic_operations(slice_result: SliceResult, sinks: list | None = None, dataflow_result: DataflowResult | None = None) -> list[SemanticOperation]:
   operations: list[SemanticOperation] = []
   relevant_node_ids = set(slice_result.relevant_node_ids)
   sinks_by_node = {s.node_id: s for s in (sinks or [])}
 
   for node in slice_result.nodes:
-    lowered = _lower_node(node, node.node_id in relevant_node_ids, sinks_by_node)
+    lowered = _lower_node(node, node.node_id in relevant_node_ids, sinks_by_node, dataflow_result)
     operations.extend(lowered)
 
   return _with_op_ids(_coalesce_plot_formatting(operations), start=1)
@@ -130,7 +131,7 @@ def _with_op_ids(operations: list[SemanticOperation], start: int) -> list[Semant
   ]
 
 
-def _lower_node(node: ProgramNode, in_slice: bool, sinks_by_node: dict[str, "VisualizationSink"] | None = None) -> list[SemanticOperation]:
+def _lower_node(node: ProgramNode, in_slice: bool, sinks_by_node: dict[str, "VisualizationSink"] | None = None, dataflow_result: DataflowResult | None = None) -> list[SemanticOperation]:
   ast_node = node.ast_node or _parse_node_snippet(node)
   if ast_node is None:
     return [_unknown_operation(node, in_slice)]
@@ -172,13 +173,28 @@ def _lower_node(node: ProgramNode, in_slice: bool, sinks_by_node: dict[str, "Vis
   if plot is not None:
     return [_plot_operation(node, plot, in_slice, sinks_by_node)]
 
+  method_plot = _find_method_plot_call(ast_node)
+  if method_plot is not None:
+    return [_method_plot_operation(node, method_plot, in_slice, sinks_by_node)]
+
   plot_formatting = _find_call(ast_node, set(PLOT_FORMATTING_CALLS))
   if plot_formatting is not None:
     return [_plot_formatting_operation(node, plot_formatting, in_slice)]
 
+  plot_formatting_method = _find_plot_formatting_method(ast_node)
+  if plot_formatting_method is not None:
+    return [_plot_formatting_operation(node, plot_formatting_method, in_slice)]
+
   show_plot = _find_call(ast_node, {"plt.show", "matplotlib.pyplot.show"})
   if show_plot is not None:
     return [_show_plot_operation(node, in_slice)]
+
+  if dataflow_result:
+    prov = dataflow_result.node_provenance.get(node.start_line)
+    if prov:
+      result = _provenance_based_operation(node, prov, in_slice, sinks_by_node)
+      if result:
+        return result
 
   return [_unknown_operation(node, in_slice)]
 
@@ -271,9 +287,25 @@ def _plot_operation(node: ProgramNode, call: ast.Call, in_slice: bool, sinks_by_
   )
 
 
+_METHOD_FORMATTING_MAP: dict[str, tuple[str, str, str]] = {
+  "set_xlabel": ("xLabel", "Label x-axis", "Label the horizontal axis"),
+  "set_ylabel": ("yLabel", "Label y-axis", "Label the vertical axis"),
+  "set_title": ("title", "Set chart title", "Set the chart title"),
+  "legend": ("legend", "Show legend", "Show a legend for the chart"),
+  "set_xticks": ("xTicks", "Format x-axis ticks", "Adjust the horizontal-axis tick labels"),
+  "set_yticks": ("yTicks", "Format y-axis ticks", "Adjust the vertical-axis tick labels"),
+  "grid": ("grid", "Set chart grid", "Turn chart grid lines on or off"),
+}
+
+
 def _plot_formatting_operation(node: ProgramNode, call: ast.Call, in_slice: bool) -> SemanticOperation:
   call_name = _dotted_name(call.func) or "plot formatting"
-  format_type, label, description = PLOT_FORMATTING_CALLS[call_name]
+  metadata = PLOT_FORMATTING_CALLS.get(call_name)
+  if metadata is None and isinstance(call.func, ast.Attribute):
+    metadata = _METHOD_FORMATTING_MAP.get(call.func.attr)
+  if metadata is None:
+    metadata = ("unknown", "Plot formatting", "Apply formatting to the chart")
+  format_type, label, description = metadata
   value = _first_string_argument(call)
   return _operation(
     kind="PlotFormatting",
@@ -298,6 +330,127 @@ def _show_plot_operation(node: ProgramNode, in_slice: bool) -> SemanticOperation
     in_slice=in_slice,
     params={"astType": node.ast_type, "displayOnly": True},
   )
+
+
+PLOT_METHOD_NAMES = {"plot", "bar", "barh", "scatter", "hist"}
+
+PLOT_FORMATTING_METHODS = {"set_xlabel", "set_ylabel", "set_title", "legend", "set_xticks", "set_yticks", "grid"}
+
+
+def _find_method_plot_call(node: ast.AST) -> ast.Call | None:
+  for child in ast.walk(node):
+    if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute):
+      if child.func.attr in PLOT_METHOD_NAMES:
+        return child
+  return None
+
+
+def _find_plot_formatting_method(node: ast.AST) -> ast.Call | None:
+  for child in ast.walk(node):
+    if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute):
+      if child.func.attr in PLOT_FORMATTING_METHODS:
+        return child
+  return None
+
+
+def _method_plot_operation(node: ProgramNode, call: ast.Call, in_slice: bool, sinks_by_node: dict[str, "VisualizationSink"] | None = None) -> SemanticOperation:
+  method_name = call.func.attr
+  kind_arg = _keyword_string(call, "kind")
+  chart_type = kind_arg or {"plot": "line", "bar": "bar", "barh": "bar", "scatter": "scatter", "hist": "histogram"}.get(method_name, "line")
+  call_name = _dotted_name(call.func) or method_name
+  columns = _columns_used_in_call(call)
+  params: dict[str, Any] = {
+    "chartType": chart_type,
+    "callName": call_name,
+    "variablesUsed": _plot_variables_used_in_call(call),
+    "columnsUsed": columns,
+  }
+  if sinks_by_node and node.node_id in sinks_by_node:
+    sink = sinks_by_node[node.node_id]
+    params["provenanceOrigins"] = getattr(sink, "provenance_origins", [])
+    params["provenanceConfidence"] = getattr(sink, "provenance_confidence", 0.0)
+
+  return _operation(
+    kind="Plot",
+    label=f"{_chart_label(chart_type)} chart",
+    lay_description=f"Draw a {_chart_label(chart_type).lower()} chart for the selected result.",
+    node=node,
+    in_slice=in_slice,
+    params=params,
+  )
+
+
+def _keyword_string(call: ast.Call, keyword_name: str) -> str | None:
+  for kw in call.keywords:
+    if kw.arg == keyword_name and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+      return kw.value.value
+  return None
+
+
+def _provenance_based_operation(node: ProgramNode, prov: "Provenance", in_slice: bool, sinks_by_node: dict | None = None) -> list[SemanticOperation] | None:
+  origins = prov.origins
+  taints = prov.taints
+
+  plot_methods = {'plot', 'bar', 'scatter', 'hist'}
+  if TaintKind.PLOT_ARGS in taints or any(o.startswith('method:') and o.split(':')[1] in plot_methods for o in origins):
+    chart_type = "line"
+    for o in origins:
+      if o.startswith('method:'):
+        m = o.split(':')[1]
+        chart_type = {"plot": "line", "bar": "bar", "scatter": "scatter", "hist": "histogram"}.get(m, chart_type)
+    return [_operation(
+      kind="Plot",
+      label=f"{_chart_label(chart_type)} chart",
+      lay_description=f"Draw a {_chart_label(chart_type).lower()} chart (detected via dataflow).",
+      node=node, in_slice=in_slice,
+      params={"chartType": chart_type, "provenanceOrigins": sorted(origins)},
+    )]
+
+  if 'read_csv' in origins:
+    source = next((o.split(':')[1] for o in origins if o.startswith('column:')), None)
+    return [_operation(
+      kind="ReadCSV",
+      label="Load CSV data",
+      lay_description="Read rows from a CSV file (detected via dataflow).",
+      node=node, in_slice=in_slice,
+      params={"output": _first_or_none(node.defines)},
+    )]
+
+  agg_methods = {'mean', 'sum', 'count', 'min', 'max', 'median', 'agg'}
+  groupby_found = any('method:groupby' in o for o in origins)
+  found_agg = [o.split(':')[1] for o in origins if o.startswith('method:') and o.split(':')[1] in agg_methods]
+
+  if groupby_found and found_agg:
+    cols = [o.split(':')[1] for o in origins if o.startswith('column:')]
+    agg_fn = found_agg[0]
+    ops: list[SemanticOperation] = []
+    ops.append(_operation(kind="GroupBy", label=f"Group by {_human_list(cols)}" if cols else "Group rows",
+      lay_description="Put related rows into groups (detected via dataflow).", node=node, in_slice=in_slice, params={"groupBy": cols}))
+    ops.append(_operation(kind="Aggregate", label=f"{_aggregation_label(agg_fn).capitalize()} values",
+      lay_description=f"Calculate the {_aggregation_label(agg_fn)} for each group (detected via dataflow).",
+      node=node, in_slice=in_slice, params={"function": agg_fn, "output": _first_or_none(node.defines)}))
+    return ops
+
+  if groupby_found:
+    return [_operation(kind="GroupBy", label="Group rows", lay_description="Put related rows into groups (detected via dataflow).",
+      node=node, in_slice=in_slice, params={})]
+
+  if found_agg:
+    agg_fn = found_agg[0]
+    return [_operation(kind="Aggregate", label=f"{_aggregation_label(agg_fn).capitalize()} values",
+      lay_description=f"Calculate the {_aggregation_label(agg_fn)} (detected via dataflow).",
+      node=node, in_slice=in_slice, params={"function": agg_fn, "output": _first_or_none(node.defines)})]
+
+  if TaintKind.DATAFRAME in taints or TaintKind.SERIES in taints:
+    label = "Transform data"
+    methods = [o.split(':')[1] for o in origins if o.startswith('method:')]
+    if methods:
+      label = f"Apply {', '.join(methods)}"
+    return [_operation(kind="Unknown", label=label,
+      lay_description=f"A data transformation step (detected via dataflow).",
+      node=node, in_slice=in_slice, params={"astType": node.ast_type, "provenanceOrigins": sorted(origins)})]
+
+  return None
 
 
 def _unknown_operation(node: ProgramNode, in_slice: bool) -> SemanticOperation:

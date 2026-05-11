@@ -86,7 +86,7 @@
     "compile": "tsc -p ./",
     "compile:all": "npm run clean && npm run build:webview && npm run compile",
     "package:vsix": "npm run compile:all && vsce package -o dist/intenttrace.vsix",
-    "install:local": "code --install-extension dist/intenttrace.vsix --force",
+    "install:local": "npm run package:vsix && code --install-extension dist/intenttrace.vsix --force",
     "test": "npm run test:analyzer && npm run test:extension-smoke",
     "test:analyzer": "python -m pytest analyzer/tests",
     "test:extension-smoke": "node scripts/verify-extension-smoke.js",
@@ -105,8 +105,5 @@
     "typescript": "^5.5.2",
     "vite": "^8.0.10"
   }
-  ,
-  "dependencies": {
-    "mermaid": "^10.4.0"
-  }
+
 }

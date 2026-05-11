@@ -6,6 +6,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import ast
+
+from dataflow import DataflowAnalyzer
 from flowgraph import build_flow_graph
 from parser import parse_program
 from schemas import AnalyzerResult, SliceResult, to_jsonable
@@ -59,6 +62,12 @@ def run_verify(
   schema = _read_json(schema_path) if schema_path else None
 
   program_nodes = parse_program(code_path)
+
+  source = code_path.read_text(encoding="utf-8")
+  full_tree = ast.parse(source, filename=str(code_path))
+  dataflow_analyzer = DataflowAnalyzer()
+  dataflow_result = dataflow_analyzer.analyze(full_tree)
+
   sinks = detect_visualization_sinks(program_nodes)
   selected_sink = select_sink(sinks, intent)
   slicing_criterion = build_slicing_criterion(selected_sink)
@@ -73,6 +82,7 @@ def run_verify(
       dependency_edges=slice_result.dependency_edges,
     ),
     sinks,
+    dataflow_result,
   )
   warnings = verify_semantics(semantic_ops, intent, schema)
   flow_graph = build_flow_graph(

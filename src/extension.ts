@@ -11,10 +11,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const analysisService = new PythonAnalysisService(context.extensionUri);
   const schemaService = new CsvSchemaService();
   const llmProvider = new LLMProviderFactory().createDefaultProvider();
-  const resultPanelManager = new WebviewPanelManager(context.extensionUri, {
-    onNodeClicked: (nodeId) => decorationsManager.revealNode(nodeId),
-    onWarningClicked: (warningId) => decorationsManager.revealWarning(warningId)
-  });
+  const resultPanelManager = new WebviewPanelManager(context.extensionUri);
   const sidebarProvider = new IntentTraceSidebarProvider(
     context,
     llmProvider,
@@ -23,6 +20,15 @@ export function activate(context: vscode.ExtensionContext): void {
     decorationsManager,
     resultPanelManager
   );
+
+  resultPanelManager.setHandlers({
+    onNodeClicked: (nodeId) => decorationsManager.revealNode(nodeId),
+    onWarningClicked: (warningId) => decorationsManager.revealWarning(warningId),
+    onFixWarning: (warningId) => sidebarProvider.handleFixWarning(warningId),
+    onDeleteWarningCode: (warningId) => sidebarProvider.handleDeleteWarningCode(warningId),
+    onEditIntentForWarning: () => sidebarProvider.handleEditIntentForWarning(),
+    onIgnoreWarning: () => {},
+  });
 
   const startCommand = vscode.commands.registerCommand('intenttrace.start', () => {
     sidebarProvider.open();

@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Flowchart } from './Flowchart';
-import { NodeDetails } from './NodeDetails';
-import { WarningPanel } from './WarningPanel';
+import { DetailsPanel } from './DetailsPanel';
 import {
   getInitialState,
   getViewKind,
+  postApplyToProject,
   postGenerateCode,
   postInferIntent,
   postNodeClicked,
@@ -40,6 +40,7 @@ function SidebarApp() {
   useIntentTraceMessages({
     setWorkflowState,
     setStatusMessage,
+    setPrompt,
     setSchema,
     setIntentJson,
     setGeneratedCodePath,
@@ -64,16 +65,23 @@ function SidebarApp() {
       <header className="app-header">
         <div>
           <h1>IntentTrace</h1>
-          <p>Prompt, generate and verify Python analysis code.</p>
+          <p>Verify AI-generated analysis code against your intent.</p>
         </div>
       </header>
 
-      <section className="workflow-panel" aria-label="IntentTrace workflow">
-        <label className="field-label" htmlFor="prompt-input">Analysis prompt</label>
+      {statusMessage ? (
+        <section className="state-banner" data-state={workflowState}>
+          <strong>{workflowState === 'error' ? 'Error' : workflowState === 'loading' ? 'Working' : 'Done'}</strong>
+          <span>{statusMessage}</span>
+        </section>
+      ) : null}
+
+      <section className="sidebar-section">
+        <h2 className="sidebar-heading">1. Describe your analysis</h2>
         <textarea
           id="prompt-input"
           className="prompt-input"
-          rows={4}
+          rows={3}
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
           placeholder="Make a bar chart of average temperature by state."
@@ -81,12 +89,16 @@ function SidebarApp() {
 
         <div className="dataset-row">
           <button className="primary-button" type="button" onClick={postPickCsv} disabled={workflowState === 'loading'}>
-            Choose CSV
+            {schema ? 'Change CSV' : 'Choose CSV'}
           </button>
-          <div>
-            <strong>{schema ? shortName(schema.sourcePath) : 'No CSV selected'}</strong>
-            <span>{schema ? `${schema.columns.length} columns${schema.rowCount !== undefined ? `, ${schema.rowCount} rows` : ''}` : 'Select a dataset before inferring intent.'}</span>
-          </div>
+          {schema ? (
+            <div className="dataset-info">
+              <strong>{shortName(schema.sourcePath)}</strong>
+              <span>{schema.columns.length} columns{schema.rowCount !== undefined ? `, ${schema.rowCount} rows` : ''}</span>
+            </div>
+          ) : (
+            <span className="sidebar-hint">Select a dataset to get started.</span>
+          )}
         </div>
 
         {schema ? (
@@ -97,49 +109,13 @@ function SidebarApp() {
           </div>
         ) : null}
 
-        <div className="action-row">
-          <button type="button" onClick={() => schema ? postInferIntent(prompt, schema) : undefined} disabled={inferDisabled}>
-            Infer Intent
-          </button>
-          <button type="button" onClick={() => parsedIntent.intent ? postGenerateCode(parsedIntent.intent) : undefined} disabled={actionDisabled}>
-            Generate Code
-          </button>
-          <button type="button" onClick={() => parsedIntent.intent ? postRunVerifier(parsedIntent.intent) : undefined} disabled={actionDisabled}>
-            Run Verifier
-          </button>
-        </div>
+        <button className="primary-button full-width" type="button" onClick={() => schema ? postInferIntent(prompt, schema) : undefined} disabled={inferDisabled}>
+          Infer Intent
+        </button>
       </section>
 
-      <section className="workflow-panel" aria-label="Open IntentTrace panels">
-        <div className="section-heading">
-          <h2>Panels</h2>
-        </div>
-        <div className="action-row">
-          <button type="button" onClick={postOpenResultsPanel} disabled={!payload}>
-            Open Flowchart Results
-          </button>
-          <button type="button" onClick={postOpenGeneratedCode} disabled={!generatedCodePath}>
-            Open Generated Code
-          </button>
-          <button type="button" onClick={() => currentIntent ? postOpenIntentDocument(currentIntent) : undefined} disabled={!currentIntent}>
-            Open Technical Intent
-          </button>
-        </div>
-        {payload ? (
-          <div className="result-summary">
-            <strong>{issueCount} issue{issueCount === 1 ? '' : 's'}</strong>
-            <span>{payload.flowGraph.nodes.length} semantic step{payload.flowGraph.nodes.length === 1 ? '' : 's'} from {shortName(payload.flowGraph.codeId)}</span>
-          </div>
-        ) : (
-          <p className="sidebar-note">Run the verifier to enable the flowchart results panel.</p>
-        )}
-      </section>
-
-      <section className="intent-editor" aria-label="Intent review">
-        <div className="section-heading">
-          <h2>Intent Review</h2>
-          {parsedIntent.error ? <span className="parse-error">Needs review</span> : null}
-        </div>
+      <section className="sidebar-section">
+        <h2 className="sidebar-heading">2. Review intent</h2>
         {currentIntent ? (
           <IntentForm
             intent={currentIntent}
@@ -149,16 +125,50 @@ function SidebarApp() {
         ) : (
           <div className="intent-empty">
             <strong>No intent inferred yet</strong>
-            <span>Choose a CSV and click Infer Intent. The result will appear here as editable fields.</span>
+            <span>Enter a prompt and choose a CSV above, then click Infer Intent.</span>
           </div>
         )}
         {parsedIntent.error ? <p className="error-text">{parsedIntent.error}</p> : null}
       </section>
 
-      {statusMessage ? (
-        <section className="state-banner" data-state={workflowState}>
-          <strong>{workflowState === 'error' ? 'Needs attention' : workflowState === 'loading' ? 'Working' : 'Status'}</strong>
-          <span>{statusMessage}</span>
+      <section className="sidebar-section">
+        <h2 className="sidebar-heading">3. Generate &amp; verify</h2>
+        <div className="action-row">
+          <button type="button" onClick={() => currentIntent ? postGenerateCode(currentIntent) : undefined} disabled={actionDisabled}>
+            {generatedCodePath ? 'Modify Code' : 'Generate Code'}
+          </button>
+          <button type="button" onClick={() => currentIntent ? postRunVerifier(currentIntent) : undefined} disabled={actionDisabled}>
+            Run Verifier
+          </button>
+        </div>
+
+        {generatedCodePath ? (
+          <div className="status-card" data-status="done">
+            <strong>Code ready</strong>
+            <span>{shortName(generatedCodePath)}</span>
+            <button className="link-button" type="button" onClick={postOpenGeneratedCode}>Open file</button>
+          </div>
+        ) : null}
+
+        {payload ? (
+          <div className="status-card" data-status={issueCount > 0 ? 'warning' : 'done'}>
+            <strong>{issueCount} issue{issueCount === 1 ? '' : 's'} found</strong>
+            <span>{payload.flowGraph.nodes.length} semantic steps from {shortName(payload.flowGraph.codeId)}</span>
+            <button className="link-button" type="button" onClick={postOpenResultsPanel}>Open results</button>
+          </div>
+        ) : null}
+      </section>
+
+      {payload || generatedCodePath ? (
+        <section className="sidebar-section">
+          <h2 className="sidebar-heading">4. Apply</h2>
+          <button className="apply-button" type="button" disabled={!generatedCodePath} onClick={postApplyToProject}>
+            Apply to project
+          </button>
+          <div className="action-row">
+            <button type="button" onClick={postOpenResultsPanel} disabled={!payload}>Flowchart</button>
+            <button type="button" onClick={() => currentIntent ? postOpenIntentDocument(currentIntent) : undefined} disabled={!currentIntent}>Intent JSON</button>
+          </div>
         </section>
       ) : null}
     </main>
@@ -227,12 +237,23 @@ function ResultsApp() {
             </section>
           ) : null}
 
+          {payload.intent ? (
+            <section className="intent-summary-bar">
+              <strong>{payload.intent.intentSummary ?? payload.intent.prompt}</strong>
+              <div className="intent-summary-fields">
+                {payload.intent.chartType ? <span>Chart: {payload.intent.chartType}</span> : null}
+                {payload.intent.groupBy?.length ? <span>Group by: {payload.intent.groupBy.join(', ')}</span> : null}
+                {payload.intent.measure ? <span>Measure: {payload.intent.measure}</span> : null}
+                {payload.intent.aggregation ? <span>Calculation: {payload.intent.aggregation}</span> : null}
+              </div>
+            </section>
+          ) : null}
+
           <section className="workspace">
             <div className="flow-column">
               <Flowchart graph={payload.flowGraph} selectedNodeId={selectedNodeId} onSelectNode={selectNode} />
             </div>
-            <NodeDetails node={selectedNode} warnings={payload.warnings} />
-            <WarningPanel warnings={payload.warnings} />
+            <DetailsPanel node={selectedNode} warnings={payload.warnings} />
           </section>
         </>
       ) : null}
@@ -382,6 +403,7 @@ function ColumnInput({ value, columns, placeholder, onChange }: ColumnInputProps
 interface MessageHandlers {
   setWorkflowState: (state: WorkflowState) => void;
   setStatusMessage: (message: string) => void;
+  setPrompt?: (prompt: string) => void;
   setSchema?: (schema: DatasetSchema) => void;
   setIntentJson?: (intentJson: string) => void;
   setGeneratedCodePath?: (codePath: string) => void;
@@ -431,6 +453,25 @@ function useIntentTraceMessages(handlers: MessageHandlers): void {
         handlers.setGeneratedCodePath(event.data.codeFilePath || '');
         handlers.setWorkflowState('idle');
         handlers.setStatusMessage(`Generated code saved to ${shortName(event.data.codeFilePath || '')}.`);
+        return;
+      }
+
+      if (event.data?.type === 'sessionRestored') {
+        const state = event.data.state;
+        if (state?.prompt !== undefined) {
+          handlers.setPrompt?.(state.prompt || '');
+        }
+        if (state?.intent) {
+          handlers.setIntentJson?.(JSON.stringify(state.intent, null, 2));
+          handlers.setSchema?.(state.intent.dataset ?? state.datasetSchema ?? null);
+        } else if (state?.datasetSchema) {
+          handlers.setSchema?.(state.datasetSchema as DatasetSchema);
+        }
+        if (state?.generatedCodePath !== undefined) {
+          handlers.setGeneratedCodePath?.(state.generatedCodePath || '');
+        }
+        handlers.setWorkflowState('idle');
+        handlers.setStatusMessage(state?.statusMessage || 'Session restored.');
         return;
       }
 

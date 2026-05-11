@@ -5,11 +5,16 @@ import type { VerificationWarning } from '../types/verification';
 export interface WebviewAnalysisPayload {
   flowGraph: FlowGraph;
   warnings: VerificationWarning[];
+  intent?: Record<string, unknown>;
 }
 
 export interface WebviewPanelHandlers {
   onNodeClicked?(nodeId: string): void | Promise<void>;
   onWarningClicked?(warningId: string): void | Promise<void>;
+  onFixWarning?(warningId: string): void | Promise<void>;
+  onDeleteWarningCode?(warningId: string): void | Promise<void>;
+  onEditIntentForWarning?(warningId: string): void | Promise<void>;
+  onIgnoreWarning?(warningId: string): void | Promise<void>;
 }
 
 export class WebviewPanelManager implements vscode.Disposable {
@@ -18,8 +23,12 @@ export class WebviewPanelManager implements vscode.Disposable {
 
   public constructor(
     private readonly extensionUri: vscode.Uri,
-    private readonly handlers: WebviewPanelHandlers = {}
+    private handlers: WebviewPanelHandlers = {}
   ) {}
+
+  public setHandlers(handlers: WebviewPanelHandlers): void {
+    this.handlers = handlers;
+  }
 
   public open(): void {
     if (this.panel) {
@@ -47,8 +56,16 @@ export class WebviewPanelManager implements vscode.Disposable {
         return;
       }
 
-      if (isWarningClickedMessage(message)) {
-        void this.handlers.onWarningClicked?.(message.warningId);
+      if (!isWarningMessage(message)) {
+        return;
+      }
+
+      switch (message.type) {
+        case 'warningClicked': void this.handlers.onWarningClicked?.(message.warningId); break;
+        case 'fixWarning': void this.handlers.onFixWarning?.(message.warningId); break;
+        case 'deleteWarningCode': void this.handlers.onDeleteWarningCode?.(message.warningId); break;
+        case 'editIntentForWarning': void this.handlers.onEditIntentForWarning?.(message.warningId); break;
+        case 'ignoreWarning': void this.handlers.onIgnoreWarning?.(message.warningId); break;
       }
     });
     this.panel.onDidDispose(() => {
@@ -135,10 +152,12 @@ function isNodeClickedMessage(message: unknown): message is { type: 'nodeClicked
     && typeof (message as { nodeId?: unknown }).nodeId === 'string';
 }
 
-function isWarningClickedMessage(message: unknown): message is { type: 'warningClicked'; warningId: string } {
+const WARNING_MESSAGE_TYPES = new Set(['warningClicked', 'fixWarning', 'deleteWarningCode', 'editIntentForWarning', 'ignoreWarning']);
+
+function isWarningMessage(message: unknown): message is { type: string; warningId: string } {
   return typeof message === 'object'
     && message !== null
-    && (message as { type?: unknown }).type === 'warningClicked'
+    && WARNING_MESSAGE_TYPES.has((message as { type?: unknown }).type as string)
     && typeof (message as { warningId?: unknown }).warningId === 'string';
 }
 

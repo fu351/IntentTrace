@@ -14,6 +14,7 @@ export interface LLMProvider {
   generateCode(input: {
     intent: IntentDSL;
     datasetSchema: DatasetSchema;
+    existingCode?: string;
     cancellationToken?: vscode.CancellationToken;
   }): Promise<string>;
 }

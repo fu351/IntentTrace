@@ -42,8 +42,11 @@ def detect_visualization_sinks(program_nodes: list[ProgramNode]) -> list[Visuali
       if call_name is None:
         continue
 
-      # simple heuristic mapping for unknown dotted names
       chart_type = SUPPORTED_CALLS.get(call_name)
+      if chart_type is None:
+        kind_kw = _keyword_string(call, 'kind')
+        if kind_kw:
+          chart_type = _normalize_chart_type(kind_kw)
       if chart_type is None:
         lname = call_name.lower()
         if 'hist' in lname:
@@ -55,7 +58,6 @@ def detect_visualization_sinks(program_nodes: list[ProgramNode]) -> list[Visuali
         elif 'plot' in lname:
           chart_type = 'line'
         else:
-          # unknown chart type; skip
           continue
 
       sinks.append(
@@ -87,12 +89,10 @@ def select_sink(
 
   intended_chart_type = _intent_chart_type(intent)
   if intended_chart_type:
-    for sink in sinks:
-      if sink.inferred_chart_type == intended_chart_type:
-        return sink
-  # fallback: pick the sink with highest provenance_confidence
-  best = max(sinks, key=lambda s: getattr(s, "provenance_confidence", 0.0))
-  return best
+    matches = [s for s in sinks if s.inferred_chart_type == intended_chart_type]
+    if matches:
+      return matches[-1]
+  return max(sinks, key=lambda s: (s.provenance_confidence, s.source_span.start_line))
 
 
 def _iter_supported_plot_calls(node: ast.AST) -> list[ast.Call]:
@@ -131,6 +131,11 @@ def _dotted_name(node: ast.AST) -> str | None:
 
 def _variables_used_in_call(call: ast.Call) -> list[str]:
   variables: set[str] = set()
+
+  if isinstance(call.func, ast.Attribute):
+    receiver = _root_name(call.func.value)
+    if receiver:
+      variables.add(receiver)
 
   for value in _call_data_arguments(call):
     for child in ast.walk(value):
@@ -185,6 +190,22 @@ def _intent_chart_type(intent: dict[str, Any] | None) -> str | None:
 
 def _normalize_chart_type(chart_type: str) -> str:
   normalized = chart_type.strip().lower()
-  if normalized == "hist":
-    return "histogram"
-  return normalized
+  mapping = {'line': 'line', 'bar': 'bar', 'barh': 'bar', 'scatter': 'scatter', 'hist': 'histogram', 'histogram': 'histogram'}
+  return mapping.get(normalized, normalized)
+
+
+def _keyword_string(call: ast.Call, keyword_name: str) -> str | None:
+  for kw in call.keywords:
+    if kw.arg == keyword_name and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+      return kw.value.value
+  return None
+
+
+def _root_name(node: ast.AST) -> str | None:
+  if isinstance(node, ast.Name):
+    return node.id
+  if isinstance(node, ast.Attribute):
+    return _root_name(node.value)
+  if isinstance(node, ast.Call) and isinstance(node.func, (ast.Attribute, ast.Name)):
+    return _root_name(node.func.value) if isinstance(node.func, ast.Attribute) else _root_name(node.func)
+  return None

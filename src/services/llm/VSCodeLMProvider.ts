@@ -22,10 +22,15 @@ export class VSCodeLMProvider implements LLMProvider {
   public async generateCode(input: {
     intent: IntentDSL;
     datasetSchema: DatasetSchema;
+    existingCode?: string;
     cancellationToken?: vscode.CancellationToken;
   }): Promise<string> {
+    const prompt = input.existingCode
+      ? buildModifyCodePrompt(input.intent, input.datasetSchema, input.existingCode)
+      : buildGenerateCodePrompt(input.intent, input.datasetSchema);
+
     const text = await this.sendJsonRequest([
-      vscode.LanguageModelChatMessage.User(buildGenerateCodePrompt(input.intent, input.datasetSchema))
+      vscode.LanguageModelChatMessage.User(prompt)
     ], input.cancellationToken);
 
     return stripMarkdownFence(text).trim();
@@ -108,6 +113,28 @@ function buildGenerateCodePrompt(intent: IntentDSL, datasetSchema: DatasetSchema
     `Dataset schema JSON: ${JSON.stringify(datasetSchema, null, 2)}`,
     '',
     'Return Python code now.'
+  ].join('\n');
+}
+
+function buildModifyCodePrompt(intent: IntentDSL, datasetSchema: DatasetSchema, existingCode: string): string {
+  return [
+    'You are IntentTrace. You have an existing Python analysis script and a new IntentDSL.',
+    'The new intent may describe an ADDITIONAL visualization, not a replacement.',
+    'If the new intent describes a different chart than what already exists in the code, ADD the new visualization code after the existing code. Do not remove or replace existing plots.',
+    'If the new intent describes the same visualization with modified parameters (e.g., changed aggregation, different columns), then modify the existing code in place.',
+    'Return the complete Python script. Do not include markdown fences or explanations.',
+    'Preserve existing imports, variable names, and data loading code.',
+    'Use pandas as pd and matplotlib.pyplot as plt.',
+    'Keep the code simple so deterministic program analysis can inspect it.',
+    '',
+    `IntentDSL JSON: ${JSON.stringify(intent, null, 2)}`,
+    '',
+    `Dataset schema JSON: ${JSON.stringify(datasetSchema, null, 2)}`,
+    '',
+    'Existing Python code:',
+    existingCode,
+    '',
+    'Return the complete Python script now.'
   ].join('\n');
 }
 

@@ -59,10 +59,12 @@ export class PythonAnalysisService {
       candidates.push({ command: 'py', baseArgs: ['-3'] });
     }
 
+    const analyzerDir = path.dirname(analyzerPath);
+
     let lastError: unknown;
     for (const candidate of candidates) {
       try {
-        return await execFileAsync(candidate.command, [...candidate.baseArgs, ...args]);
+        return await execFileAsync(candidate.command, [...candidate.baseArgs, ...args], analyzerDir);
       } catch (error) {
         if (!isMissingExecutableError(error)) {
           throw error;
@@ -90,9 +92,9 @@ export class PythonAnalysisService {
   }
 }
 
-function execFileAsync(command: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+function execFileAsync(command: string, args: string[], cwd?: string): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile(command, args, { maxBuffer: 10 * 1024 * 1024, cwd }, (error, stdout, stderr) => {
       if (error) {
         const message = stderr.trim() || stdout.trim() || error.message;
         error.message = message;

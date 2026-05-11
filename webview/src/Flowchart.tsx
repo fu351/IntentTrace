@@ -1,5 +1,3 @@
-import { useEffect, useRef } from 'react';
-import mermaid from 'mermaid';
 import type { FlowGraph, FlowNode } from './vscodeApi';
 
 interface FlowchartProps {
@@ -8,140 +6,109 @@ interface FlowchartProps {
   onSelectNode: (node: FlowNode) => void;
 }
 
-function _safeId(id: string) {
-  return id.replace(/[^a-zA-Z0-9]/g, '_');
-}
+const STATUS_ICONS: Record<FlowNode['status'], string> = {
+  relevant: '✓',
+  vestigial: '−',
+  warning: '!',
+  error: '✗',
+  unsupported: '?'
+};
 
-function _buildMermaid(graph: FlowGraph): string {
-  const parts: string[] = [];
-  parts.push('flowchart LR');
+type FlowGroup =
+  | { type: 'node'; node: FlowNode; index: number }
+  | { type: 'vestigial'; nodes: FlowNode[]; startIndex: number };
 
-  const idMap: Record<string, string> = {};
-  graph.nodes.forEach((node, idx) => {
-    const nid = `N${idx}_${_safeId(node.nodeId)}`;
-    idMap[node.nodeId] = nid;
-    const label = `${node.kind}: ${node.title}`.replace(/"/g, "'");
-    parts.push(`${nid}["${label}"]`);
-  });
+function groupNodes(nodes: FlowNode[]): FlowGroup[] {
+  const groups: FlowGroup[] = [];
+  let vestigialBatch: FlowNode[] = [];
+  let batchStart = 0;
 
-  (graph.edges || []).forEach(edge => {
-    const s = idMap[edge.source] ?? _safeId(edge.source);
-    const t = idMap[edge.target] ?? _safeId(edge.target);
-    if (edge.label) {
-      const lbl = String(edge.label).replace(/"/g, "'");
-      parts.push(`${s} -->|${lbl}| ${t}`);
+  const flushVestigial = () => {
+    if (vestigialBatch.length > 0) {
+      groups.push({ type: 'vestigial', nodes: vestigialBatch, startIndex: batchStart });
+      vestigialBatch = [];
+    }
+  };
+
+  nodes.forEach((node, index) => {
+    if (node.status === 'vestigial') {
+      if (vestigialBatch.length === 0) {
+        batchStart = index;
+      }
+      vestigialBatch.push(node);
     } else {
-      parts.push(`${s} --> ${t}`);
+      flushVestigial();
+      groups.push({ type: 'node', node, index });
     }
   });
-
-  // class definitions for node statuses
-  parts.push('classDef relevant fill:#e6ffed,stroke:#2da44e,stroke-width:1.5px');
-  parts.push('classDef vestigial fill:#f3f4f6,stroke:#6e7781,stroke-width:1px,opacity:0.6');
-  parts.push('classDef warning fill:#fff7e6,stroke:#9a6700,stroke-width:1.5px');
-  parts.push('classDef error fill:#fff0f0,stroke:#cf222e,stroke-width:1.5px');
-  parts.push('classDef unsupported stroke-dasharray: 5 5,fill:#ffffff,stroke:#6e7781');
-
-  // assign classes to nodes
-  graph.nodes.forEach((node) => {
-    const nid = idMap[node.nodeId];
-    if (!nid) return;
-    const cls = node.status ?? 'unsupported';
-    parts.push(`class ${nid} ${cls}`);
-  });
-
-  return parts.join('\n');
+  flushVestigial();
+  return groups;
 }
 
 export function Flowchart({ graph, selectedNodeId, onSelectNode }: FlowchartProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const diagram = _buildMermaid(graph);
-    let cancelled = false;
-
-    const renderFallback = () => {
-      container.innerHTML = '';
-      const frag = document.createDocumentFragment();
-      graph.nodes.forEach((node, index) => {
-        const item = document.createElement('div');
-        item.className = 'flow-step';
-
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'flow-node';
-        btn.dataset.status = node.status;
-        btn.dataset.selected = String(node.nodeId === selectedNodeId);
-        btn.onclick = () => onSelectNode(node);
-
-        const kind = document.createElement('span');
-        kind.className = 'node-kind';
-        kind.textContent = node.kind;
-        btn.appendChild(kind);
-
-        const title = document.createElement('span');
-        title.className = 'node-title';
-        title.textContent = node.title;
-        btn.appendChild(title);
-
-        const desc = document.createElement('span');
-        desc.className = 'node-description';
-        desc.textContent = node.description;
-        btn.appendChild(desc);
-
-        if (node.warningIds.length > 0) {
-          const w = document.createElement('span');
-          w.className = 'node-warning-count';
-          w.textContent = `${node.warningIds.length} warning${node.warningIds.length === 1 ? '' : 's'}`;
-          btn.appendChild(w);
-        }
-
-        item.appendChild(btn);
-        if (index < graph.nodes.length - 1) {
-          const edge = document.createElement('div');
-          edge.className = 'flow-edge';
-          edge.setAttribute('aria-hidden', 'true');
-          item.appendChild(edge);
-        }
-
-        frag.appendChild(item);
-      });
-      container.appendChild(frag);
-    };
-
-    // If mermaid is available, render into container; otherwise fallback to list view
-    if (mermaid && typeof mermaid.render === 'function') {
-      (async () => {
-        try {
-          const id = `mermaid_${Math.random().toString(36).slice(2, 9)}`;
-          mermaid.initialize({ startOnLoad: false, theme: 'base' });
-          const rendered = await mermaid.render(id, diagram);
-          if (cancelled) return;
-          container.innerHTML = typeof rendered === 'string' ? rendered : rendered.svg;
-        } catch (e) {
-          if (cancelled) return;
-          container.innerHTML = '<pre></pre>';
-          const pre = container.querySelector('pre');
-          if (pre) {
-            pre.textContent = diagram;
-          }
-        }
-      })();
-    } else {
-      renderFallback();
-    }
-
-    return () => {
-      cancelled = true;
-    };
-  }, [graph, selectedNodeId, onSelectNode]);
+  const groups = groupNodes(graph.nodes);
 
   return (
-    <section className="flowchart" aria-label="Semantic flowchart">
-      <div ref={containerRef} />
+    <section className="flowchart-vertical" aria-label="Semantic flowchart">
+      {groups.map((group, gi) => {
+        const isLast = gi === groups.length - 1;
+
+        if (group.type === 'vestigial') {
+          return (
+            <div className="flow-step" key={`vestigial-${group.startIndex}`}>
+              <details className="vestigial-group">
+                <summary className="vestigial-summary">
+                  <span className="flow-dot vestigial-dot">−</span>
+                  <span>{group.nodes.length} unrelated step{group.nodes.length === 1 ? '' : 's'}</span>
+                </summary>
+                <div className="vestigial-list">
+                  {group.nodes.map((node) => (
+                    <button
+                      className="flow-node"
+                      data-status="vestigial"
+                      data-selected={String(node.nodeId === selectedNodeId)}
+                      type="button"
+                      key={node.nodeId}
+                      onClick={() => onSelectNode(node)}
+                    >
+                      <span className="flow-dot">−</span>
+                      <div className="flow-body">
+                        <span className="flow-kind">{node.kind}</span>
+                        <span className="flow-title">{node.title}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </details>
+              {!isLast ? <div className="flow-connector" aria-hidden="true" /> : null}
+            </div>
+          );
+        }
+
+        const { node } = group;
+        return (
+          <div className="flow-step" key={node.nodeId}>
+            <button
+              className="flow-node"
+              data-status={node.status}
+              data-selected={String(node.nodeId === selectedNodeId)}
+              type="button"
+              onClick={() => onSelectNode(node)}
+            >
+              <span className="flow-dot">{STATUS_ICONS[node.status]}</span>
+              <div className="flow-body">
+                <span className="flow-kind">{node.kind}</span>
+                <span className="flow-title">{node.title}</span>
+                <span className="flow-desc">{node.description}</span>
+                {node.warningIds.length > 0 ? (
+                  <span className="flow-badge">{node.warningIds.length} issue{node.warningIds.length === 1 ? '' : 's'}</span>
+                ) : null}
+              </div>
+            </button>
+            {!isLast ? <div className="flow-connector" aria-hidden="true" /> : null}
+          </div>
+        );
+      })}
     </section>
   );
 }

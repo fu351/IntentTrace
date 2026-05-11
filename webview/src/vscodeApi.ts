@@ -77,6 +77,7 @@ export interface FlowGraph {
 export interface AnalysisPayload {
   flowGraph: FlowGraph;
   warnings: VerificationWarning[];
+  intent?: IntentDSL;
 }
 
 export interface InitialState {
@@ -171,4 +172,24 @@ export function postWarningClicked(warningId: string): void {
     type: 'warningClicked',
     warningId
   });
+}
+
+export function postApplyToProject(): void {
+  vscode?.postMessage({ type: 'applyToProject' });
+}
+
+export function postFixWarning(warningId: string): void {
+  vscode?.postMessage({ type: 'fixWarning', warningId });
+}
+
+export function postDeleteWarningCode(warningId: string): void {
+  vscode?.postMessage({ type: 'deleteWarningCode', warningId });
+}
+
+export function postEditIntentForWarning(warningId: string): void {
+  vscode?.postMessage({ type: 'editIntentForWarning', warningId });
+}
+
+export function postIgnoreWarning(warningId: string): void {
+  vscode?.postMessage({ type: 'ignoreWarning', warningId });
 }
