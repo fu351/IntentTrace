@@ -6,6 +6,7 @@ import {
   getInitialState,
   getViewKind,
   postApplyToProject,
+  postClearSession,
   postGenerateCode,
   postInferIntent,
   postNodeClicked,
@@ -60,6 +61,17 @@ function SidebarApp() {
     setIntentJson(JSON.stringify({ ...currentIntent, ...patch }, null, 2));
   };
 
+  const handleClear = () => {
+    setPrompt('');
+    setSchema(null);
+    setIntentJson('');
+    setGeneratedCodePath('');
+    setPayload(null);
+    setWorkflowState('idle');
+    setStatusMessage('');
+    postClearSession();
+  };
+
   return (
     <main className="app-shell app-shell--sidebar">
       <header className="app-header">
@@ -67,6 +79,9 @@ function SidebarApp() {
           <h1>IntentTrace</h1>
           <p>Verify AI-generated analysis code against your intent.</p>
         </div>
+        <button className="clear-button" type="button" onClick={handleClear} disabled={workflowState === 'loading'} title="Clear all fields and start over">
+          Clear
+        </button>
       </header>
 
       {statusMessage ? (
@@ -458,20 +473,17 @@ function useIntentTraceMessages(handlers: MessageHandlers): void {
 
       if (event.data?.type === 'sessionRestored') {
         const state = event.data.state;
-        if (state?.prompt !== undefined) {
-          handlers.setPrompt?.(state.prompt || '');
-        }
+        handlers.setPrompt?.(state?.prompt || '');
         if (state?.intent) {
           handlers.setIntentJson?.(JSON.stringify(state.intent, null, 2));
           handlers.setSchema?.(state.intent.dataset ?? state.datasetSchema ?? null);
-        } else if (state?.datasetSchema) {
-          handlers.setSchema?.(state.datasetSchema as DatasetSchema);
+        } else {
+          handlers.setIntentJson?.('');
+          handlers.setSchema?.(state?.datasetSchema as DatasetSchema ?? null);
         }
-        if (state?.generatedCodePath !== undefined) {
-          handlers.setGeneratedCodePath?.(state.generatedCodePath || '');
-        }
+        handlers.setGeneratedCodePath?.(state?.generatedCodePath || '');
         handlers.setWorkflowState('idle');
-        handlers.setStatusMessage(state?.statusMessage || 'Session restored.');
+        handlers.setStatusMessage(state?.statusMessage || '');
         return;
       }
 

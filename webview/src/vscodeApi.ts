@@ -178,6 +178,10 @@ export function postApplyToProject(): void {
   vscode?.postMessage({ type: 'applyToProject' });
 }
 
+export function postClearSession(): void {
+  vscode?.postMessage({ type: 'clearSession' });
+}
+
 export function postFixWarning(warningId: string): void {
   vscode?.postMessage({ type: 'fixWarning', warningId });
 }

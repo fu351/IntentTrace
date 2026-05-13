@@ -362,7 +362,7 @@ def _method_plot_operation(node: ProgramNode, call: ast.Call, in_slice: bool, si
   params: dict[str, Any] = {
     "chartType": chart_type,
     "callName": call_name,
-    "variablesUsed": _plot_variables_used_in_call(call),
+    "variablesUsed": _variables_used_in_call(call),
     "columnsUsed": columns,
   }
   if sinks_by_node and node.node_id in sinks_by_node:

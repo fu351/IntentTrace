@@ -106,6 +106,11 @@ export class WebviewPanelManager implements vscode.Disposable {
     });
   }
 
+  public clear(): void {
+    this.panel?.dispose();
+    this.panel = undefined;
+  }
+
   public dispose(): void {
     this.panel?.dispose();
     this.panel = undefined;

@@ -35,7 +35,8 @@ type SidebarMessage =
   | { type: 'deleteWarningCode'; warningId: string }
   | { type: 'editIntentForWarning'; warningId: string }
   | { type: 'ignoreWarning'; warningId: string }
-  | { type: 'applyToProject' };
+  | { type: 'applyToProject' }
+  | { type: 'clearSession' };
 
 export class IntentTraceSidebarProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   public static readonly viewType = 'intenttrace.sidebar';
@@ -71,6 +72,45 @@ export class IntentTraceSidebarProvider implements vscode.WebviewViewProvider, v
     });
     webviewView.onDidDispose(() => {
       this.view = undefined;
+    });
+
+    if (this.state.intent) {
+      this.sendCurrentSessionToWebview();
+    } else {
+      void this.tryRestoreFileSession();
+    }
+  }
+
+  private sendCurrentSessionToWebview(): void {
+    if (!this.state.intent) {
+      return;
+    }
+    this.postMessage({
+      type: 'sessionRestored',
+      state: {
+        prompt: this.state.prompt,
+        intent: this.state.intent,
+        datasetSchema: this.state.datasetSchema ?? this.state.intent?.dataset,
+        generatedCodePath: this.state.generatedCodePath,
+        statusMessage: this.state.statusMessage || 'Session restored.',
+      }
+    });
+  }
+
+  private clearSessionState(filePath: string | undefined): void {
+    this.state = {
+      activeCodeFilePath: filePath,
+      statusMessage: undefined,
+    };
+    this.postMessage({
+      type: 'sessionRestored',
+      state: {
+        prompt: '',
+        intent: null,
+        datasetSchema: null,
+        generatedCodePath: '',
+        statusMessage: '',
+      }
     });
   }
 
@@ -175,6 +215,17 @@ export class IntentTraceSidebarProvider implements vscode.WebviewViewProvider, v
 
     if (message.type === 'deleteWarningCode') {
       await this.handleDeleteWarningCode(message.warningId);
+      return;
+    }
+
+    if (message.type === 'clearSession') {
+      const filePath = this.state.activeCodeFilePath;
+      this.clearSessionState(undefined);
+      this.decorationsManager.clear();
+      this.resultPanelManager.clear();
+      if (filePath) {
+        void this.deleteSessionFile(filePath);
+      }
       return;
     }
 
@@ -548,6 +599,19 @@ export class IntentTraceSidebarProvider implements vscode.WebviewViewProvider, v
     await fs.writeFile(sessionPath, JSON.stringify(session, null, 2), 'utf8');
   }
 
+  private async deleteSessionFile(filePath: string): Promise<void> {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) {
+      return;
+    }
+    const sessionPath = path.join(workspaceFolder.uri.fsPath, '.intenttrace', 'sessions', `${safeFileName(filePath)}.json`);
+    try {
+      await fs.unlink(sessionPath);
+    } catch {
+      // File may not exist
+    }
+  }
+
   private async tryRestoreFileSession(): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor || editor.document.uri.scheme !== 'file') {
@@ -571,6 +635,7 @@ export class IntentTraceSidebarProvider implements vscode.WebviewViewProvider, v
       const raw = await fs.readFile(sessionPath, 'utf8');
       const session = JSON.parse(raw);
       if (!session || !session.intent) {
+        this.clearSessionState(filePath);
         return;
       }
 
@@ -595,7 +660,7 @@ export class IntentTraceSidebarProvider implements vscode.WebviewViewProvider, v
         }
       });
     } catch {
-      // No session for this file
+      this.clearSessionState(filePath);
     }
   }
 
@@ -720,7 +785,7 @@ function isSidebarMessage(value: unknown): value is SidebarMessage {
   if (value.type === 'generateCode' || value.type === 'runVerifier') {
     return isRecord(value.intent);
   }
-  if (value.type === 'openResultsPanel' || value.type === 'openGeneratedCode' || value.type === 'applyToProject') {
+  if (value.type === 'openResultsPanel' || value.type === 'openGeneratedCode' || value.type === 'applyToProject' || value.type === 'clearSession') {
     return true;
   }
   if (value.type === 'openIntentDocument') {

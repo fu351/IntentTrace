@@ -95,6 +95,11 @@ export class DecorationsManager implements vscode.Disposable {
     await this.revealFirstSpan(warning.sourceSpans);
   }
 
+  public clear(): void {
+    this.state = undefined;
+    this.applyToVisibleEditors();
+  }
+
   public dispose(): void {
     this.visibleEditorListener.dispose();
     this.relevantDecoration.dispose();
