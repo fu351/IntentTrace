@@ -58,6 +58,124 @@ def test_plot_lowers_to_line_plot_with_source_metadata() -> None:
   assert plot_op.in_slice is True
 
 
+def test_value_counts_normalize_lowers_to_percentage_aggregate(tmp_path: Path) -> None:
+  code_path = tmp_path / "value_counts_percentage.py"
+  code_path.write_text(
+    "\n".join(
+      [
+        "import pandas as pd",
+        "df = pd.read_csv('weather.csv')",
+        "shares = df['state'].value_counts(normalize=True)",
+      ]
+    ),
+    encoding="utf-8",
+  )
+
+  nodes = parse_program(code_path)
+  slice_result = SliceResult(
+    criterion=SlicingCriterion(),
+    nodes=nodes,
+    relevant_node_ids=[node.node_id for node in nodes],
+  )
+
+  operations = lower_to_semantic_operations(slice_result)
+  aggregate_op = next(operation for operation in operations if operation.kind == "Aggregate")
+
+  assert aggregate_op.params["function"] == "percentage"
+  assert aggregate_op.params["measure"] == "state"
+  assert aggregate_op.label == "Percentage of state"
+
+
+def test_groupby_divide_by_sum_times_hundred_lowers_to_percentage(tmp_path: Path) -> None:
+  code_path = tmp_path / "groupby_percentage.py"
+  code_path.write_text(
+    "\n".join(
+      [
+        "import pandas as pd",
+        "df = pd.read_csv('weather.csv')",
+        "pct = df.groupby('state')['temperature'].sum() / df['temperature'].sum() * 100",
+      ]
+    ),
+    encoding="utf-8",
+  )
+
+  nodes = parse_program(code_path)
+  slice_result = SliceResult(
+    criterion=SlicingCriterion(),
+    nodes=nodes,
+    relevant_node_ids=[node.node_id for node in nodes],
+  )
+
+  operations = lower_to_semantic_operations(slice_result)
+  kinds = [operation.kind for operation in operations]
+  assert "GroupBy" in kinds
+  assert "Aggregate" in kinds
+
+  groupby_op = next(operation for operation in operations if operation.kind == "GroupBy")
+  aggregate_op = next(operation for operation in operations if operation.kind == "Aggregate")
+
+  assert groupby_op.params["groupBy"] == ["state"]
+  assert aggregate_op.params["function"] == "percentage"
+  assert aggregate_op.params["measure"] == "temperature"
+
+
+def test_pie_plot_lowers_to_pie_chart(tmp_path: Path) -> None:
+  code_path = tmp_path / "pie_example.py"
+  code_path.write_text(
+    "\n".join(
+      [
+        "import pandas as pd",
+        "import matplotlib.pyplot as plt",
+        "df = pd.read_csv('weather.csv')",
+        "summary = df.groupby('state')['temperature'].mean().reset_index()",
+        "plt.pie(summary['temperature'], labels=summary['state'])",
+      ]
+    ),
+    encoding="utf-8",
+  )
+
+  nodes = parse_program(code_path)
+  slice_result = SliceResult(
+    criterion=SlicingCriterion(),
+    nodes=nodes,
+    relevant_node_ids=[node.node_id for node in nodes],
+  )
+
+  operations = lower_to_semantic_operations(slice_result)
+  plot_op = next(operation for operation in operations if operation.kind == "Plot")
+
+  assert plot_op.params["chartType"] == "pie"
+  assert plot_op.params["callName"] == "plt.pie"
+  assert plot_op.label == "Pie chart"
+
+
+def test_pie_method_call_lowers_to_pie_chart(tmp_path: Path) -> None:
+  code_path = tmp_path / "pie_method_example.py"
+  code_path.write_text(
+    "\n".join(
+      [
+        "import pandas as pd",
+        "df = pd.read_csv('weather.csv')",
+        "summary = df.groupby('state')['temperature'].mean()",
+        "summary.plot(kind='pie')",
+      ]
+    ),
+    encoding="utf-8",
+  )
+
+  nodes = parse_program(code_path)
+  slice_result = SliceResult(
+    criterion=SlicingCriterion(),
+    nodes=nodes,
+    relevant_node_ids=[node.node_id for node in nodes],
+  )
+
+  operations = lower_to_semantic_operations(slice_result)
+  plot_op = next(operation for operation in operations if operation.kind == "Plot")
+
+  assert plot_op.params["chartType"] == "pie"
+
+
 def test_plot_formatting_lowers_to_semantic_nodes() -> None:
   nodes = parse_program(ANALYZER_DIR / "fixtures" / "plot_formatting_example.py")
   slice_result = SliceResult(

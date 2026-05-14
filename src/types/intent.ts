@@ -6,8 +6,8 @@ export interface IntentDSL {
   dataset: DatasetSchema;
   groupBy?: string[];
   measure?: string;
-  aggregation?: 'mean' | 'count' | 'sum' | 'min' | 'max' | 'median' | string;
-  chartType?: 'bar' | 'line' | 'scatter' | 'histogram' | string;
+  aggregation?: 'mean' | 'count' | 'sum' | 'min' | 'max' | 'median' | 'percentage' | string;
+  chartType?: 'bar' | 'line' | 'scatter' | 'histogram' | 'pie' | string;
   operations?: string[];
   expectedVisualization?: {
     chartType?: string;

@@ -49,3 +49,50 @@ def test_select_sink_prefers_intent_chart_type_when_multiple_sinks(tmp_path: Pat
   assert selected_sink is not None
   assert selected_sink.call_name == "plt.bar"
   assert selected_sink.inferred_chart_type == "bar"
+
+
+def test_detects_pie_chart_sink(tmp_path: Path) -> None:
+  code_path = tmp_path / "pie_plot.py"
+  code_path.write_text(
+    "\n".join(
+      [
+        "import pandas as pd",
+        "import matplotlib.pyplot as plt",
+        "df = pd.read_csv('weather.csv')",
+        "summary = df.groupby('state')['temperature'].mean().reset_index()",
+        "plt.pie(summary['temperature'], labels=summary['state'])",
+      ]
+    ),
+    encoding="utf-8",
+  )
+
+  nodes = parse_program(code_path)
+  sinks = detect_visualization_sinks(nodes)
+  selected_sink = select_sink(sinks, {"chartType": "pie"})
+
+  assert selected_sink is not None
+  assert selected_sink.call_name == "plt.pie"
+  assert selected_sink.inferred_chart_type == "pie"
+
+
+def test_select_sink_prefers_pie_when_intent_is_pie(tmp_path: Path) -> None:
+  code_path = tmp_path / "multiple_plots_with_pie.py"
+  code_path.write_text(
+    "\n".join(
+      [
+        "import matplotlib.pyplot as plt",
+        "plt.bar(summary['state'], summary['temperature'])",
+        "plt.pie(summary['temperature'], labels=summary['state'])",
+      ]
+    ),
+    encoding="utf-8",
+  )
+
+  nodes = parse_program(code_path)
+  sinks = detect_visualization_sinks(nodes)
+
+  selected_sink = select_sink(sinks, {"chartType": "pie"})
+
+  assert selected_sink is not None
+  assert selected_sink.call_name == "plt.pie"
+  assert selected_sink.inferred_chart_type == "pie"

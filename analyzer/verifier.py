@@ -15,22 +15,32 @@ def verify_semantics(
 
   expected_aggregation = _intent_string(intent, "aggregation")
   if expected_aggregation:
-    for operation in _sliced_ops(semantic_ops, "Aggregate"):
-      actual = _normalized_string(operation.params.get("function"))
-      if actual and actual != expected_aggregation:
-        measure = _normalized_string(operation.params.get("measure"))
-        warnings.append(
-          _warning(
-            kind="wrong_aggregation",
-            severity="error",
-            operation=operation,
-            title="Wrong calculation",
-            user_message=_aggregation_message(expected_aggregation, actual, measure),
-            technical_message="Sliced Aggregate operation params.function differs from intent.aggregation.",
-            expected=expected_aggregation,
-            actual=actual,
-          )
+    sliced_aggregates = _sliced_ops(semantic_ops, "Aggregate")
+    actual_functions = {
+      function
+      for operation in sliced_aggregates
+      if (function := _normalized_string(operation.params.get("function")))
+    }
+    if sliced_aggregates and expected_aggregation not in actual_functions:
+      # Multi-step pipelines (e.g. count followed by `... / total * 100`) can
+      # have several Aggregate ops. The intent is satisfied as long as the
+      # expected aggregation appears somewhere in the sliced computation;
+      # only flag the mismatch when no aggregate matches.
+      final_aggregate = sliced_aggregates[-1]
+      actual = _normalized_string(final_aggregate.params.get("function"))
+      measure = _normalized_string(final_aggregate.params.get("measure"))
+      warnings.append(
+        _warning(
+          kind="wrong_aggregation",
+          severity="error",
+          operation=final_aggregate,
+          title="Wrong calculation",
+          user_message=_aggregation_message(expected_aggregation, actual or "", measure),
+          technical_message="No sliced Aggregate operation has function matching intent.aggregation.",
+          expected=expected_aggregation,
+          actual=actual,
         )
+      )
 
   expected_chart_type = _intent_string(intent, "chartType")
   if expected_chart_type:
@@ -385,8 +395,13 @@ def _human_list(values: list[str]) -> str:
 
 
 def _aggregation_message(expected: str, actual: str, measure: str | None) -> str:
-  subject = f" {measure}" if measure else ""
-  return f"The intent asks for the {_aggregation_label(expected)}{subject}, but this code uses the {_aggregation_label(actual)}."
+  expected_label = _aggregation_label(expected)
+  actual_label = _aggregation_label(actual)
+  if measure:
+    expected_phrase = f"{expected_label} of {measure}" if expected == "percentage" else f"{expected_label} {measure}"
+  else:
+    expected_phrase = expected_label
+  return f"The intent asks for the {expected_phrase}, but this code uses the {actual_label}."
 
 
 def _aggregation_label(value: str) -> str:
@@ -394,6 +409,7 @@ def _aggregation_label(value: str) -> str:
     "mean": "average",
     "count": "count",
     "sum": "total",
+    "percentage": "percentage",
   }
   return labels.get(value, value)
 
@@ -404,5 +420,6 @@ def _chart_label(value: str) -> str:
     "bar": "bar",
     "scatter": "scatter",
     "histogram": "histogram",
+    "pie": "pie",
   }
   return labels.get(value, value)

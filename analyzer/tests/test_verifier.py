@@ -108,6 +108,121 @@ def test_verifier_groups_vestigial_code_into_one_note() -> None:
   assert "2 steps" in vestigial_warnings[0].user_message
 
 
+def test_verifier_accepts_multi_step_percentage_pipeline() -> None:
+  # Mirrors the user pattern: an intermediate `count` feeds a final percentage step.
+  warnings = verify_semantics(
+    [
+      _semantic_operation(
+        op_id="op-1",
+        kind="Aggregate",
+        params={"function": "count", "measure": "DOEID"},
+      ),
+      _semantic_operation(
+        op_id="op-2",
+        kind="Aggregate",
+        params={"function": "percentage", "measure": None},
+      ),
+    ],
+    {"aggregation": "percentage"},
+  )
+
+  aggregation_warnings = [warning for warning in warnings if warning.kind == "wrong_aggregation"]
+  assert aggregation_warnings == []
+
+
+def test_verifier_flags_multi_step_pipeline_when_expected_aggregation_missing() -> None:
+  warnings = verify_semantics(
+    [
+      _semantic_operation(
+        op_id="op-1",
+        kind="Aggregate",
+        params={"function": "count", "measure": "DOEID"},
+      ),
+      _semantic_operation(
+        op_id="op-2",
+        kind="Aggregate",
+        params={"function": "sum", "measure": "DOEID"},
+      ),
+    ],
+    {"aggregation": "percentage"},
+  )
+
+  aggregation_warnings = [warning for warning in warnings if warning.kind == "wrong_aggregation"]
+  assert len(aggregation_warnings) == 1
+  # Anchors on the most downstream Aggregate operation.
+  assert aggregation_warnings[0].op_id == "op-2"
+  assert aggregation_warnings[0].expected == "percentage"
+  assert aggregation_warnings[0].actual == "sum"
+
+
+def test_verifier_reports_percentage_aggregation_mismatch() -> None:
+  warnings = verify_semantics(
+    [
+      _semantic_operation(
+        op_id="op-1",
+        kind="Aggregate",
+        params={"function": "count", "measure": "state"},
+      ),
+    ],
+    {"aggregation": "percentage"},
+  )
+
+  aggregation_warning = next(warning for warning in warnings if warning.kind == "wrong_aggregation")
+  assert aggregation_warning.expected == "percentage"
+  assert aggregation_warning.actual == "count"
+  assert "percentage of state" in aggregation_warning.user_message
+
+
+def test_verifier_accepts_matching_percentage_aggregation() -> None:
+  warnings = verify_semantics(
+    [
+      _semantic_operation(
+        op_id="op-1",
+        kind="Aggregate",
+        params={"function": "percentage", "measure": "state"},
+      ),
+    ],
+    {"aggregation": "percentage"},
+  )
+
+  aggregation_warnings = [warning for warning in warnings if warning.kind == "wrong_aggregation"]
+  assert aggregation_warnings == []
+
+
+def test_verifier_reports_pie_chart_mismatch() -> None:
+  warnings = verify_semantics(
+    [
+      _semantic_operation(
+        op_id="op-1",
+        kind="Plot",
+        params={"chartType": "bar", "columnsUsed": ["state", "temperature"]},
+      ),
+    ],
+    {"chartType": "pie"},
+  )
+
+  chart_warning = next(warning for warning in warnings if warning.kind == "wrong_chart_type")
+  assert chart_warning.expected == "pie"
+  assert chart_warning.actual == "bar"
+  assert "pie" in chart_warning.user_message
+
+
+def test_verifier_accepts_matching_pie_chart() -> None:
+  warnings = verify_semantics(
+    [
+      _semantic_operation(
+        op_id="op-1",
+        kind="Plot",
+        params={"chartType": "pie", "columnsUsed": ["state", "temperature"]},
+      ),
+    ],
+    {"chartType": "pie"},
+  )
+
+  chart_warnings = [warning for warning in warnings if warning.kind == "wrong_chart_type"]
+  assert chart_warnings == []
+
+
 def test_verifier_maps_label_mismatches_to_plot_formatting_ops() -> None:
   warnings = verify_semantics(
     [

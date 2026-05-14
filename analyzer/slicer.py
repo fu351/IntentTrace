@@ -9,10 +9,12 @@ PLOT_CALLS = {
   "plt.bar",
   "plt.scatter",
   "plt.hist",
+  "plt.pie",
   "matplotlib.pyplot.plot",
   "matplotlib.pyplot.bar",
   "matplotlib.pyplot.scatter",
   "matplotlib.pyplot.hist",
+  "matplotlib.pyplot.pie",
 }
 
 PLOT_DISPLAY_CALLS = {

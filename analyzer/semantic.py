@@ -12,10 +12,12 @@ PLOT_CHART_TYPES = {
   "plt.bar": "bar",
   "plt.scatter": "scatter",
   "plt.hist": "histogram",
+  "plt.pie": "pie",
   "matplotlib.pyplot.plot": "line",
   "matplotlib.pyplot.bar": "bar",
   "matplotlib.pyplot.scatter": "scatter",
   "matplotlib.pyplot.hist": "histogram",
+  "matplotlib.pyplot.pie": "pie",
 }
 
 PLOT_FORMATTING_CALLS = {
@@ -162,6 +164,15 @@ def _lower_node(node: ProgramNode, in_slice: bool, sinks_by_node: dict[str, "Vis
     return [_parse_date_operation(node, parse_date, in_slice)]
 
   groupby = _find_method_call(ast_node, {"groupby"})
+
+  percentage = _find_percentage_pattern(ast_node)
+  if percentage is not None:
+    ops: list[SemanticOperation] = []
+    if groupby is not None:
+      ops.append(_groupby_operation(node, groupby, in_slice))
+    ops.append(_percentage_aggregate_operation(node, percentage, groupby, in_slice))
+    return ops
+
   aggregate = _find_method_call(ast_node, {"mean", "count", "agg"})
   if groupby is not None and aggregate is not None:
     return [
@@ -261,6 +272,88 @@ def _aggregate_operation(
   )
 
 
+def _find_percentage_pattern(node: ast.AST) -> ast.AST | None:
+  """Detect statements that compute a percentage / proportion.
+
+  Recognized patterns:
+  - `series.value_counts(normalize=True)` — proportions, treated as percentage
+  - any `BinOp` containing both a `.sum()` call and a literal `100` multiplier,
+    e.g. `df.groupby('x')['y'].sum() / df['y'].sum() * 100`
+  """
+  for child in ast.walk(node):
+    if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute):
+      if child.func.attr == "value_counts" and _has_truthy_keyword(child, "normalize"):
+        return child
+
+  for child in ast.walk(node):
+    if isinstance(child, ast.BinOp) and _is_percentage_binop(child):
+      return child
+
+  return None
+
+
+def _has_truthy_keyword(call: ast.Call, keyword_name: str) -> bool:
+  for kw in call.keywords:
+    if kw.arg == keyword_name and isinstance(kw.value, ast.Constant):
+      return bool(kw.value.value)
+  return False
+
+
+def _is_percentage_binop(binop: ast.BinOp) -> bool:
+  has_hundred = False
+  has_sum_call = False
+  for sub in ast.walk(binop):
+    if isinstance(sub, ast.Constant) and isinstance(sub.value, (int, float)) and sub.value == 100:
+      has_hundred = True
+    if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute) and sub.func.attr == "sum":
+      has_sum_call = True
+  return has_hundred and has_sum_call
+
+
+def _percentage_aggregate_operation(
+  node: ProgramNode,
+  expression: ast.AST,
+  groupby_call: ast.Call | None,
+  in_slice: bool,
+) -> SemanticOperation:
+  measure = _percentage_measure(expression, groupby_call)
+  params = {
+    "function": "percentage",
+    "measure": measure,
+    "output": _first_or_none(node.defines),
+  }
+  return _operation(
+    kind="Aggregate",
+    label=_aggregate_label("percentage", measure),
+    lay_description=_aggregate_description("percentage", measure),
+    node=node,
+    in_slice=in_slice,
+    params=params,
+  )
+
+
+def _percentage_measure(expression: ast.AST, groupby_call: ast.Call | None) -> str | None:
+  if groupby_call is not None:
+    via_groupby = _measure_column(groupby_call)
+    if via_groupby:
+      return via_groupby
+
+  if isinstance(expression, ast.Call) and isinstance(expression.func, ast.Attribute):
+    base = expression.func.value
+    base_column = _column_from_expression(base)
+    if base_column:
+      return base_column
+
+  columns = _columns_in_expr(expression)
+  return columns[0] if columns else None
+
+
+def _column_from_expression(node: ast.AST) -> str | None:
+  if isinstance(node, ast.Subscript):
+    return _constant_string(node.slice)
+  return None
+
+
 def _plot_operation(node: ProgramNode, call: ast.Call, in_slice: bool, sinks_by_node: dict[str, "VisualizationSink"] | None = None) -> SemanticOperation:
   call_name = _dotted_name(call.func) or "plot"
   chart_type = PLOT_CHART_TYPES[call_name]
@@ -332,7 +425,7 @@ def _show_plot_operation(node: ProgramNode, in_slice: bool) -> SemanticOperation
   )
 
 
-PLOT_METHOD_NAMES = {"plot", "bar", "barh", "scatter", "hist"}
+PLOT_METHOD_NAMES = {"plot", "bar", "barh", "scatter", "hist", "pie"}
 
 PLOT_FORMATTING_METHODS = {"set_xlabel", "set_ylabel", "set_title", "legend", "set_xticks", "set_yticks", "grid"}
 
@@ -356,7 +449,7 @@ def _find_plot_formatting_method(node: ast.AST) -> ast.Call | None:
 def _method_plot_operation(node: ProgramNode, call: ast.Call, in_slice: bool, sinks_by_node: dict[str, "VisualizationSink"] | None = None) -> SemanticOperation:
   method_name = call.func.attr
   kind_arg = _keyword_string(call, "kind")
-  chart_type = kind_arg or {"plot": "line", "bar": "bar", "barh": "bar", "scatter": "scatter", "hist": "histogram"}.get(method_name, "line")
+  chart_type = kind_arg or {"plot": "line", "bar": "bar", "barh": "bar", "scatter": "scatter", "hist": "histogram", "pie": "pie"}.get(method_name, "line")
   call_name = _dotted_name(call.func) or method_name
   columns = _columns_used_in_call(call)
   params: dict[str, Any] = {
@@ -391,13 +484,13 @@ def _provenance_based_operation(node: ProgramNode, prov: "Provenance", in_slice:
   origins = prov.origins
   taints = prov.taints
 
-  plot_methods = {'plot', 'bar', 'scatter', 'hist'}
+  plot_methods = {'plot', 'bar', 'scatter', 'hist', 'pie'}
   if TaintKind.PLOT_ARGS in taints or any(o.startswith('method:') and o.split(':')[1] in plot_methods for o in origins):
     chart_type = "line"
     for o in origins:
       if o.startswith('method:'):
         m = o.split(':')[1]
-        chart_type = {"plot": "line", "bar": "bar", "scatter": "scatter", "hist": "histogram"}.get(m, chart_type)
+        chart_type = {"plot": "line", "bar": "bar", "scatter": "scatter", "hist": "histogram", "pie": "pie"}.get(m, chart_type)
     return [_operation(
       kind="Plot",
       label=f"{_chart_label(chart_type)} chart",
@@ -850,6 +943,8 @@ def _aggregate_description(function: str, measure: str | None) -> str:
 def _aggregate_label(function: str, measure: str | None) -> str:
   label = _aggregation_label(function)
   if measure:
+    if function == "percentage":
+      return f"{label.capitalize()} of {measure}"
     return f"{label.capitalize()} {measure}"
   return f"{label.capitalize()} values"
 
@@ -860,6 +955,7 @@ def _aggregation_label(function: str) -> str:
     "count": "count",
     "sum": "total",
     "aggregate": "summary",
+    "percentage": "percentage",
   }
   return labels.get(function, function)
 
@@ -870,6 +966,7 @@ def _chart_label(chart_type: str) -> str:
     "bar": "Bar",
     "scatter": "Scatter",
     "histogram": "Histogram",
+    "pie": "Pie",
   }
   return labels.get(chart_type, chart_type.capitalize())
 

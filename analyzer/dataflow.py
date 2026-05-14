@@ -290,7 +290,7 @@ class DataflowAnalyzer:
                     prov = Provenance(origins=set(base_prov.origins), taints=set(base_prov.taints), confidence=base_prov.confidence * 0.85)
                     prov.origins.add(f"method:{method}")
                     # some methods return Series (e.g., df['col'] handled earlier), groupby returns DataFrameGroupBy (treat as DataFrame)
-                    if method in {"plot", "plotly", "hist", "bar", "scatter"}:
+                    if method in {"plot", "plotly", "hist", "bar", "scatter", "pie"}:
                         prov.taints.add(TaintKind.PLOT_ARGS)
                     if method in {"groupby", "resample"}:
                         prov.taints.add(TaintKind.DATAFRAME)

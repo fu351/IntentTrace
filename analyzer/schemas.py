@@ -50,7 +50,7 @@ class VisualizationSink:
   call_name: str
   variables_used: list[str]
   columns_used: list[str]
-  inferred_chart_type: Literal["line", "bar", "scatter", "histogram"]
+  inferred_chart_type: Literal["line", "bar", "scatter", "histogram", "pie"]
   provenance_origins: list[str] = field(default_factory=list)
   provenance_confidence: float = 0.0
 

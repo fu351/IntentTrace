@@ -338,6 +338,7 @@ function IntentForm({ intent, schema, onChange }: IntentFormProps) {
             <option value="min">Minimum</option>
             <option value="max">Maximum</option>
             <option value="median">Median</option>
+            <option value="percentage">Percentage</option>
           </select>
         </label>
 
@@ -349,6 +350,7 @@ function IntentForm({ intent, schema, onChange }: IntentFormProps) {
             <option value="line">Line chart</option>
             <option value="scatter">Scatter plot</option>
             <option value="histogram">Histogram</option>
+            <option value="pie">Pie chart</option>
           </select>
         </label>
       </div>

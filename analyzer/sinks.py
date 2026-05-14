@@ -12,10 +12,12 @@ SUPPORTED_CALLS = {
   "plt.bar": "bar",
   "plt.scatter": "scatter",
   "plt.hist": "histogram",
+  "plt.pie": "pie",
   "matplotlib.pyplot.plot": "line",
   "matplotlib.pyplot.bar": "bar",
   "matplotlib.pyplot.scatter": "scatter",
   "matplotlib.pyplot.hist": "histogram",
+  "matplotlib.pyplot.pie": "pie",
 }
 
 
@@ -55,6 +57,8 @@ def detect_visualization_sinks(program_nodes: list[ProgramNode]) -> list[Visuali
           chart_type = 'bar'
         elif 'scatter' in lname:
           chart_type = 'scatter'
+        elif 'pie' in lname:
+          chart_type = 'pie'
         elif 'plot' in lname:
           chart_type = 'line'
         else:
@@ -190,7 +194,15 @@ def _intent_chart_type(intent: dict[str, Any] | None) -> str | None:
 
 def _normalize_chart_type(chart_type: str) -> str:
   normalized = chart_type.strip().lower()
-  mapping = {'line': 'line', 'bar': 'bar', 'barh': 'bar', 'scatter': 'scatter', 'hist': 'histogram', 'histogram': 'histogram'}
+  mapping = {
+    'line': 'line',
+    'bar': 'bar',
+    'barh': 'bar',
+    'scatter': 'scatter',
+    'hist': 'histogram',
+    'histogram': 'histogram',
+    'pie': 'pie',
+  }
   return mapping.get(normalized, normalized)
 
 
